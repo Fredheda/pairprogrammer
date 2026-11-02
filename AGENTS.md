@@ -22,6 +22,7 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 | Path | What |
 |------|------|
 | `backend/` | FastAPI app, package `pairprogrammer` in `src/`, tests in `tests/` |
+| `backend/src/pairprogrammer/{jira,github}_client.py` | Read-only Jira and GitHub clients; `remote.py` holds the GET-only HTTP layer |
 | `frontend/` | Next.js App Router app; `app/api/copilotkit/` is the CopilotKit runtime (no agents yet) |
 | `Procfile` | `honcho start` runs both apps |
 | `scripts/ci-local.sh` | Runs every check CI runs |
@@ -29,6 +30,18 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 
 The browser calls the backend through the Next.js rewrite `/backend/*` ->
 `BACKEND_URL` (default `http://localhost:8000`), so there is no CORS setup.
+
+## Jira and GitHub reads
+
+`make_jira_client(env)` and `make_github_client(env)` are the factory seams
+(tests pass an `httpx.MockTransport`; see `tests/fake_http.py`). Both build
+clients on `read_only_client`, whose request hook raises `ReadOnlyViolation`
+for anything but GET, and `ReadOnlyHttp` exposes only `get`. Every call
+returns `RemoteResult(text, refs)` or `RemoteError(kind, ...)` (401, 403, 404,
+rate limits, network errors, bad input); nothing raises into the agent.
+Refs cite `jira:PAIR-7`, `jira:PAIR-7 (comment 10479)` or
+`github:Fredheda/pairprogrammer#2`. Jira keys and JQL are confined to
+projects PW, CKE, TA, PP, RR and PAIR; GitHub repos to `GITHUB_OWNER`.
 
 ## Commands
 
