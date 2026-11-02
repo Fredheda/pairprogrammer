@@ -35,5 +35,8 @@
   },
   "allowScripts": {
     "@scarf/scarf": false
+  },
+  "overrides": {
+    "zod": "^4.6.6"
   }
 }
