@@ -41,6 +41,13 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 | Frontend tests | `cd frontend && npm test` (vitest, jsdom) |
 | Frontend lint/types/build | `npm run lint`, `npm run typecheck`, `npm run build` |
 
+`frontend/package.json` overrides `zod` to `^4.6.6`: CopilotKit 1.83 and `@ag-ui/*`
+pin zod 3, which has no fix for GHSA-mrhx-c7xc-m3w5. Remove the override once
+CopilotKit ships on zod 4 (PAIR-18). Keep `@copilotkit/react-core` and
+`@copilotkit/runtime` on the same version, never override `@ag-ui/*`, and after
+any dependency change check that `npm ls @copilotkit/react-core @ag-ui/client zod`
+shows one version each, then run `npm run build`. A2UI catalogs import from `zod/v3`.
+
 ## Practices
 
 - Tests first: write and run the failing test before the code. Unit tests for
