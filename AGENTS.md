@@ -33,9 +33,22 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 The background agent is a `ClaudeAgentAdapter` (`backend/src/pairprogrammer/agent.py`)
 served over AG-UI at `POST /agent`. The CopilotKit runtime reaches it server-side at
 `${BACKEND_URL}/agent` through an `HttpAgent`. The agent ID `pairprogrammer` must match in
-`agent.py`, the runtime's `agents` map and `<CopilotKitProvider agentId>`. Agent tests
-fake `claude_agent_sdk.ClaudeSDKClient` (no network). `@ag-ui/client` is pinned to the
-exact version CopilotKit pins, so only one copy is installed.
+`agent.py`, the runtime's `agents` map and `<CopilotKitProvider agentId>`.
+
+`agent.agent_options(*fragments)` is the only place that builds `ClaudeAgentOptions`:
+model, `tools=[]`, `strict_mcp_config`, `permission_mode="dontAsk"`, no setting sources
+and `max_turns=MAX_TURNS`. Features add tools, roots or hooks as an `OptionsFragment`
+(an object with `apply(options) -> options`) passed to `agent_options` / `make_adapter`.
+
+The adapter is a process singleton that keeps one Claude CLI worker per AG-UI thread in
+memory, so run the backend as a single uvicorn worker (no `--workers N`), or threads lose
+their state between requests.
+
+Agent tests install `tests/fakes.py:FakeClaudeClient` through
+`install_fake_claude_client` (no network). The adapter takes no client factory; it looks
+up `claude_agent_sdk.ClaudeSDKClient` when a thread's worker starts, and a test fails if
+an `ag-ui-claude-sdk` upgrade changes that. `@ag-ui/client` is pinned to the exact
+version CopilotKit pins, so only one copy is installed.
 
 ## Commands
 
