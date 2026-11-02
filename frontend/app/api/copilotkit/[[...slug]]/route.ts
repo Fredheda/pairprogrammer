@@ -3,10 +3,10 @@ import {
   createCopilotRuntimeHandler,
   InMemoryAgentRunner,
 } from "@copilotkit/runtime/v2";
+import { createAgents } from "@/lib/agent";
 
-// Agents are registered here once the backend serves its AG-UI endpoint.
 const runtime = new CopilotRuntime({
-  agents: {},
+  agents: createAgents(process.env.BACKEND_URL ?? "http://localhost:8000"),
   runner: new InMemoryAgentRunner(),
 });
 
