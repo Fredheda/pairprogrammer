@@ -1,1 +1,40 @@
+# Env / secrets
 .env
+.env*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+local.settings.json
+terraform.tfstate
+terraform.tfstate.*
+.azure/
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+build/
+dist/
+coverage/
+*.tsbuildinfo
+next-env.d.ts
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+*.log
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/

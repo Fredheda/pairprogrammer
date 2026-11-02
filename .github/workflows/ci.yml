@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# A new push to the same PR cancels the run that is still going. Pushes to
+# main are never cancelled, so every commit on main gets a result.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+# Job ids become required-check names in the branch ruleset: keep them stable.
+# scripts/ci-local.sh runs the same commands; change both together.
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Poetry
+        run: pipx install "poetry>=2.0,<3.0"
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: backend/.python-version
+          cache: poetry
+          cache-dependency-path: backend/poetry.lock
+      - run: poetry install --no-interaction
+      - run: poetry run ruff check .
+      - run: poetry run ruff format --check .
+      - run: poetry run pyright
+      - run: poetry run pytest -v
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run build
