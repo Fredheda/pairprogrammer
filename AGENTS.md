@@ -58,4 +58,30 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 `CI` (`.github/workflows/ci.yml`) runs on every PR and push to `main` with
 jobs `backend` (ruff, ruff format, pyright, pytest) and `frontend` (eslint,
 tsc, vitest, next build). Job ids are required-check names: keep them stable.
-`scripts/ci-local.sh` mirrors the same commands; change both together.
+`scripts/ci-local.sh` mirrors the same commands plus the blocking security
+checks (needs `gitleaks`, `actionlint` and `uv` on the PATH); change them
+together.
+
+`Security` (`.github/workflows/security.yml`) runs on PRs, weekly and on
+demand: `gitleaks` (PR commits; full history otherwise) and `workflow-lint`
+(actionlint) on every push, `bandit`, `pip-audit`, `npm-audit` and `codeql`
+once a PR is ready. Required on `main`: `backend`, `frontend`, `gitleaks`,
+`workflow-lint`, `bandit`. The audits are advisory on PRs and fail the weekly
+run. Dependabot (`.github/dependabot.yml`) proposes weekly grouped
+minor/patch updates for backend, frontend and actions, 14 days after release.
+
+## PR review
+
+`Claude Review` (`.github/workflows/claude-review.yml`) reviews each ready PR
+and every push to it; the owner can comment `@claude` for a follow-up. It only
+comments (no approve, merge or push), skips drafts, forks, Dependabot and every
+bot except Devin (`devin-ai-integration[bot]`) and Claude (`claude[bot]`), and
+skips itself on a PR that changes the workflow file. Do not make it a required
+check.
+
+- Auth: repo secret `CLAUDE_CODE_OAUTH_TOKEN` (owner: `claude setup-token`,
+  then `gh secret set CLAUDE_CODE_OAUTH_TOKEN --repo Fredheda/pairprogrammer`).
+  Tokens last about a year; expiry: _record the date here when the token is
+  created_. Fallback if subscription auth is refused:
+  `anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}` in both jobs.
+- Public repo: `main` takes changes only through PRs (ruleset `main-protect`).

@@ -1,0 +1,130 @@
+name: Security
+
+# Pull requests, a weekly run and on demand (`gh workflow run security.yml
+# --ref main`); a merge to main starts nothing. gitleaks and workflow-lint run
+# on every push to a PR, draft or not; the other scans run once the PR is
+# ready. Required checks on main: gitleaks, workflow-lint, bandit. The
+# dependency audits and CodeQL are advisory on PRs.
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+  # Advisories appear without any code change, so the audits also run weekly.
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+# A new push to the same PR cancels the run that is still going. Scheduled
+# runs are never cancelled.
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  # Runs the pinned gitleaks image directly: the gitleaks action needs a
+  # license key for organization repos.
+  gitleaks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      # PRs scan only the commits they add; other runs scan the whole history.
+      - name: Scan for secrets
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          log_opts=()
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            log_opts=(--log-opts="${BASE_SHA}..${HEAD_SHA}")
+          fi
+          docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 \
+            git /repo --redact --no-banner --verbose "${log_opts[@]}"
+
+  workflow-lint:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Lint workflows
+        run: docker run --rm -v "$PWD:/repo" -w /repo rhysd/actionlint:1.7.12 -color
+
+  # HIGH severity only: bandit's lower levels are mostly noise here (ruff's
+  # S rules already run in CI).
+  bandit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: backend/.python-version
+      - run: pipx run --python "$(which python)" bandit==1.9.4 -r backend/src -lll
+
+  # Advisory on PRs (a new advisory against an old dependency must not fail an
+  # unrelated PR); the weekly run fails visibly.
+  pip-audit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install Poetry
+        run: pipx install "poetry>=2.0,<3.0"
+      - uses: actions/setup-python@v7
+        with:
+          python-version-file: backend/.python-version
+          cache: poetry
+          cache-dependency-path: backend/poetry.lock
+      - run: poetry install --no-interaction
+      - run: poetry run pip install pip-audit==2.10.1
+      - run: poetry run pip-audit --local
+
+  # Same policy as pip-audit. Runtime dependencies only, high and critical.
+  npm-audit:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: ${{ github.event_name == 'pull_request' }}
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .nvmrc
+      - run: npm audit --omit=dev --audit-level=high
+
+  # Findings appear in the repo's Security tab, not as a failing check.
+  codeql:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+      actions: read
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [python, javascript-typescript]
+    steps:
+      - uses: actions/checkout@v7
+      - uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+      - uses: github/codeql-action/analyze@v4
+        with:
+          category: /language:${{ matrix.language }}
