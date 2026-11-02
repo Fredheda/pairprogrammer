@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -29,123 +30,145 @@ def docs(tmp_path: Path) -> Path:
     root = tmp_path / "docs"
     (root / "plans").mkdir(parents=True)
     (root / "plans" / "voice.md").write_text(PLAN)
-    (root / "readme.md").write_text("Pairprogrammer docs.\nSee the voice plan.\n")
+    (root / "readme.md").write_text("Pairprogrammer docs.\n")
     return root
 
 
 @pytest.fixture
-def sources(docs: Path) -> Sources:
-    return Sources([SourceRoot("docs", docs)], max_bytes=1000)
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "app"
+    (root / "src").mkdir(parents=True)
+    (root / "dist").mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
+    (root / ".gitignore").write_text("dist/\n")
+    (root / "src" / "main.py").write_text("print('hi')\n")
+    (root / "dist" / "bundle.js").write_text("x\n")
+    (root / ".env").write_text("API_KEY=secret\n")
+    (root / "src" / ".env.local").write_text("API_KEY=secret\n")
+    (root / "certs").mkdir()
+    (root / "certs" / "server.pem").write_text("-----BEGIN-----\n")
+    return root
 
 
-def assert_refs_in_root(refs: tuple[SourceRef, ...], root: str = "docs") -> None:
-    assert refs
-    for ref in refs:
-        assert ref.root == root
-        assert ref.path
-        assert ref.cite().startswith(f"{root}:")
+@pytest.fixture
+def sources(docs: Path, repo: Path) -> Sources:
+    return Sources([SourceRoot("docs", docs), SourceRoot("app", repo)])
+
+
+def read(path: str | Path) -> tuple[str, dict[str, str]]:
+    return "Read", {"file_path": str(path)}
+
+
+def test_duplicate_root_names_are_refused(tmp_path: Path) -> None:
+    (tmp_path / "a" / "app").mkdir(parents=True)
+    (tmp_path / "b" / "app").mkdir(parents=True)
+
+    with pytest.raises(SourceError, match="duplicate root name: app"):
+        Sources(
+            [SourceRoot("app", tmp_path / "a" / "app"), SourceRoot("app", tmp_path / "b" / "app")]
+        )
+    with pytest.raises(SourceError, match="duplicate root name: app"):
+        Sources.from_env({"REPO_ROOTS": f"{tmp_path / 'a' / 'app'},{tmp_path / 'b' / 'app'}"})
+
+
+def test_list_roots_gives_names_and_absolute_paths(
+    sources: Sources, docs: Path, repo: Path
+) -> None:
+    result = sources.list_roots()
+
+    assert result.text.splitlines() == [f"docs: {docs}", f"app: {repo}"]
+    assert result.refs == (SourceRef("docs", "."), SourceRef("app", "."))
+
+
+def test_cwd_is_the_first_root(sources: Sources, docs: Path) -> None:
+    assert sources.cwd == docs
+    assert Sources([]).cwd is None
+
+
+@pytest.mark.parametrize("path", ["readme.md", "plans/voice.md"])
+def test_allows_reads_inside_a_root(sources: Sources, docs: Path, path: str) -> None:
+    assert sources.deny_reason(*read(path)) is None
+    assert sources.deny_reason(*read(docs / path)) is None
+
+
+def test_allows_reads_in_other_roots(sources: Sources, repo: Path) -> None:
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is None
 
 
 @pytest.mark.parametrize(
-    "path",
-    [
-        "../secret.txt",
-        "plans/../../secret.txt",
-        "plans/../readme.md",
-        "/etc/passwd",
-    ],
+    "path", ["../secret.txt", "plans/../../secret.txt", "plans/../readme.md", "/etc/passwd"]
 )
-def test_rejects_paths_that_leave_the_root(sources: Sources, path: str) -> None:
-    with pytest.raises(SourceError, match="outside"):
-        sources.read_file("docs", path)
+def test_denies_paths_that_leave_a_root(sources: Sources, path: str) -> None:
+    assert "outside" in (sources.deny_reason(*read(path)) or "")
 
 
-def test_accepts_absolute_path_inside_the_root(sources: Sources, docs: Path) -> None:
-    result = sources.read_file("docs", str(docs / "readme.md"))
-
-    assert "Pairprogrammer docs." in result.text
-    assert result.refs[0].path == "readme.md"
-
-
-def test_rejects_symlink_that_escapes_the_root(
-    sources: Sources, docs: Path, tmp_path: Path
-) -> None:
-    secret = tmp_path / "secret.txt"
-    secret.write_text("top secret")
-    (docs / "link.txt").symlink_to(secret)
+def test_denies_symlinks_that_escape_a_root(sources: Sources, docs: Path, tmp_path: Path) -> None:
+    (tmp_path / "secret.txt").write_text("top secret")
+    (docs / "link.txt").symlink_to(tmp_path / "secret.txt")
     (docs / "linkdir").symlink_to(tmp_path, target_is_directory=True)
 
-    with pytest.raises(SourceError, match="outside"):
-        sources.read_file("docs", "link.txt")
-    with pytest.raises(SourceError, match="outside"):
-        sources.read_file("docs", "linkdir/secret.txt")
-    listed = sources.list_files("docs").text
-    assert "link.txt" not in listed
-    assert "linkdir" not in listed
-    assert "top secret" not in sources.search_text("docs", "secret").text
+    assert "outside" in (sources.deny_reason(*read(docs / "link.txt")) or "")
+    assert "outside" in (sources.deny_reason("Grep", {"path": str(docs / "linkdir")}) or "")
 
 
-def test_unknown_root(sources: Sources) -> None:
-    with pytest.raises(SourceError, match="unknown root"):
-        sources.read_file("nope", "readme.md")
+@pytest.mark.parametrize("path", [".env", "src/.env.local", "certs/server.pem"])
+def test_denies_secret_files(sources: Sources, repo: Path, path: str) -> None:
+    assert "secret" in (sources.deny_reason(*read(repo / path)) or "")
 
 
-def test_missing_file(sources: Sources) -> None:
-    with pytest.raises(SourceError, match="not found"):
-        sources.read_file("docs", "plans/missing.md")
+def test_denies_symlink_to_a_secret(sources: Sources, repo: Path) -> None:
+    (repo / "notes.txt").symlink_to(repo / ".env")
+
+    assert "secret" in (sources.deny_reason(*read(repo / "notes.txt")) or "")
 
 
-def test_read_file_carries_line_range(sources: Sources) -> None:
-    result = sources.read_file("docs", "readme.md")
-
-    assert result.text == "Pairprogrammer docs.\nSee the voice plan.\n"
-    assert result.refs == (SourceRef("docs", "readme.md", lines=(1, 2)),)
-    assert result.refs[0].cite() == "docs:readme.md#L1-L2"
+def test_denies_gitignored_files(sources: Sources, repo: Path) -> None:
+    assert "ignored" in (sources.deny_reason(*read(repo / "dist" / "bundle.js")) or "")
+    assert "ignored" in (sources.deny_reason("Grep", {"path": str(repo / "dist")}) or "")
 
 
-def test_large_file_is_truncated_with_marker(docs: Path) -> None:
-    (docs / "big.md").write_text("".join(f"line {i}\n" for i in range(1, 101)))
-    sources = Sources([SourceRoot("docs", docs)], max_bytes=50)
-
-    result = sources.read_file("docs", "big.md")
-
-    assert result.text.startswith("line 1\n")
-    assert result.text.endswith("[truncated: showing 50 of 792 bytes]")
-    shown_lines = result.text.split("\n[truncated")[0].count("\n") + 1
-    assert result.refs[0].lines == (1, shown_lines)
+def test_grep_and_glob_default_to_the_cwd(sources: Sources) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "voice"}) is None
+    assert sources.deny_reason("Glob", {"pattern": "**/*.md"}) is None
 
 
-def test_list_files_recurses_and_skips_noise(sources: Sources, docs: Path) -> None:
-    (docs / ".git").mkdir()
-    (docs / ".git" / "config").write_text("x")
-    (docs / "node_modules").mkdir()
-    (docs / "node_modules" / "x.js").write_text("x")
-
-    result = sources.list_files("docs")
-
-    assert result.text.splitlines() == ["plans/voice.md", "readme.md"]
-    assert_refs_in_root(result.refs)
-    assert sources.list_files("docs", "plans").text.splitlines() == ["plans/voice.md"]
+def test_grep_and_glob_stay_inside_roots(sources: Sources, repo: Path) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "x", "path": str(repo / "src")}) is None
+    assert "outside" in (sources.deny_reason("Grep", {"pattern": "x", "path": "/etc"}) or "")
+    assert "outside" in (sources.deny_reason("Glob", {"pattern": "*", "path": "/"}) or "")
 
 
-def test_search_text_is_case_insensitive_with_line_refs(sources: Sources) -> None:
-    result = sources.search_text("docs", "VOICE")
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Glob", {"pattern": "/etc/*"}),
+        ("Glob", {"pattern": "../**/*"}),
+        ("Grep", {"pattern": "x", "glob": "../*"}),
+    ],
+)
+def test_denies_globs_that_leave_a_root(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert "outside" in (sources.deny_reason(tool, tool_input) or "")
 
-    assert result.text.splitlines() == [
-        "plans/voice.md:1: # Voice briefing plan",
-        "readme.md:2: See the voice plan.",
-    ]
-    assert result.refs == (
-        SourceRef("docs", "plans/voice.md", lines=(1, 1)),
-        SourceRef("docs", "readme.md", lines=(2, 2)),
-    )
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Grep", {"pattern": "KEY", "glob": ".env*"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/*.pem"}),
+        ("Glob", {"pattern": "**/.env"}),
+    ],
+)
+def test_denies_globs_that_target_secrets(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert "secret" in (sources.deny_reason(tool, tool_input) or "")
 
 
-def test_search_text_without_matches(sources: Sources) -> None:
-    result = sources.search_text("docs", "kubernetes")
-
-    assert result.text == "no matches for 'kubernetes'"
-    assert result.refs == (SourceRef("docs", "."),)
+def test_denies_other_tools_and_everything_without_roots(docs: Path) -> None:
+    assert Sources([SourceRoot("docs", docs)]).deny_reason("Bash", {"command": "ls"})
+    assert Sources([]).deny_reason(*read(docs / "readme.md"))
 
 
 def test_outline_lists_headings_outside_code_fences(sources: Sources) -> None:
@@ -161,21 +184,52 @@ def test_outline_lists_headings_outside_code_fences(sources: Sources) -> None:
     assert result.refs[1].cite() == "docs:plans/voice.md#L5 (Goal)"
 
 
+def test_outline_without_headings(sources: Sources) -> None:
+    result = sources.outline("docs", "readme.md")
+
+    assert result.text == "no headings"
+    assert result.refs == (SourceRef("docs", "readme.md"),)
+
+
+@pytest.mark.parametrize(
+    ("root", "path", "error"),
+    [
+        ("nope", "readme.md", "unknown root"),
+        ("docs", "../secret.md", "outside"),
+        ("docs", "missing.md", "not found"),
+        ("app", ".env", "secret"),
+        ("app", "dist/bundle.js", "ignored"),
+    ],
+)
+def test_outline_refuses_what_the_hook_refuses(
+    sources: Sources, root: str, path: str, error: str
+) -> None:
+    with pytest.raises(SourceError, match=error):
+        sources.outline(root, path)
+
+
+def test_outline_stops_at_the_byte_budget_on_a_whole_line(docs: Path) -> None:
+    (docs / "big.md").write_text("".join(f"# Überschrift {i}\n" for i in range(1, 101)))
+    sources = Sources([SourceRoot("docs", docs)], max_bytes=50)
+
+    result = sources.outline("docs", "big.md")
+
+    assert result.text.splitlines() == ["L1 # Überschrift 1", "L2 # Überschrift 2"]
+    assert "\ufffd" not in result.text
+
+
 def test_from_env_builds_docs_and_repo_roots(tmp_path: Path) -> None:
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "repo-a").mkdir()
-    (tmp_path / "repo-b").mkdir()
+    for name in ("docs", "repo-a", "repo-b"):
+        (tmp_path / name).mkdir()
 
     sources = Sources.from_env(
         {
             "WORKSPACE_DOCS_DIR": str(tmp_path / "docs"),
-            "REPO_ROOTS": f"{tmp_path / 'repo-a'},{tmp_path / 'repo-b'}",
-            "SOURCE_MAX_BYTES": "1234",
+            "REPO_ROOTS": f"{tmp_path / 'repo-a'}, {tmp_path / 'repo-b'}",
         }
     )
 
     assert [root.name for root in sources.roots] == ["docs", "repo-a", "repo-b"]
-    assert sources.max_bytes == 1234
 
 
 def test_from_env_without_roots_is_empty() -> None:

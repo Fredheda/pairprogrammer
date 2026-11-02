@@ -22,8 +22,8 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 | Path | What |
 |------|------|
 | `backend/` | FastAPI app, package `pairprogrammer` in `src/`, tests in `tests/` |
-| `backend/src/pairprogrammer/sources.py` | Read-only, root-confined file access (list, read, search, outline) |
-| `backend/src/pairprogrammer/source_tools.py` | Claude Agent SDK tools and `agent_options` over `sources.py` |
+| `backend/src/pairprogrammer/sources.py` | Source roots, the path/secret checks behind the read hook, Markdown outline |
+| `backend/src/pairprogrammer/source_tools.py` | `agent_options`: built-in read tools, the `PreToolUse` hook, `outline`/`list_roots` |
 | `frontend/` | Next.js App Router app; `app/api/copilotkit/` is the CopilotKit runtime (no agents yet) |
 | `Procfile` | `honcho start` runs both apps |
 | `scripts/ci-local.sh` | Runs every check CI runs |
@@ -34,16 +34,24 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 
 ## Read-only sources
 
-The agent reads only through `Sources`: root `docs` (`WORKSPACE_DOCS_DIR`) and
-one root per checkout in `REPO_ROOTS`, named after its directory. Paths with
-`..`, absolute paths outside a root and symlinks that leave a root are
-refused; `.git`, `node_modules`, `.venv`, `.next` and `__pycache__` are
-skipped. Files over `SOURCE_MAX_BYTES` end in a `[truncated: ...]` marker.
-Every result carries `Source: <root>:<path>#L<a>-L<b> (<heading>)` lines.
-`agent_options` disables every built-in Claude tool (`tools=[]`), loads only
-the in-process `sources` MCP server (`strict_mcp_config`) and denies anything
-not in `READ_ONLY_TOOLS` (`permission_mode="dontAsk"`). Never add write,
-edit or shell tools; `tests/test_source_tools.py` fails if one appears.
+Roots: `docs` (`WORKSPACE_DOCS_DIR`) plus one per checkout in `REPO_ROOTS`,
+named after its directory; duplicate names are refused. `agent_options` turns
+on only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`),
+with `cwd` = the first root, `add_dirs` = the rest and `permission_mode="dontAsk"`,
+plus the in-process MCP tools `outline` and `list_roots` (`strict_mcp_config`).
+Three layers keep reads inside the roots and away from secrets:
+
+1. `dontAsk` denies reads outside the working directories.
+2. The `PreToolUse` hook (`Sources.deny_reason`) resolves every path (symlinks
+   included) and denies anything outside a root, any `..`, secret names
+   (`SECRET_PATTERNS`: `.env*`, `*.pem`, `*.key`, SSH keys, `.npmrc`, ...),
+   gitignored paths (`git check-ignore`) and globs that target secrets.
+3. `disallowed_tools` holds `Read(//<root>/**/<pattern>)` deny rules, which the
+   CLI also applies to `Grep`/`Glob` results.
+
+The model cites from `Read` line numbers and `Grep -n`; `outline` and
+`list_roots` attach `Source: <root>:<path>#L<n> (<heading>)` lines. Never add
+write, edit or shell tools; `tests/test_source_tools.py` fails if one appears.
 
 ## Commands
 
