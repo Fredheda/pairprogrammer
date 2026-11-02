@@ -23,7 +23,7 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 |------|------|
 | `backend/` | FastAPI app, package `pairprogrammer` in `src/`, tests in `tests/` |
 | `backend/src/pairprogrammer/sources.py` | Source roots, the path/secret checks behind the read hook, Markdown outline |
-| `backend/src/pairprogrammer/source_tools.py` | `agent_options`: built-in read tools, the `PreToolUse` hook, `outline`/`list_roots` |
+| `backend/src/pairprogrammer/source_tools.py` | `SourceTools.apply`: built-in read tools, the `PreToolUse` hook, `outline`/`list_roots` |
 | `frontend/` | Next.js App Router app; `app/api/copilotkit/` is the CopilotKit runtime (no agents yet) |
 | `Procfile` | `honcho start` runs both apps |
 | `scripts/ci-local.sh` | Runs every check CI runs |
@@ -35,10 +35,12 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 ## Read-only sources
 
 Roots: `docs` (`WORKSPACE_DOCS_DIR`) plus one per checkout in `REPO_ROOTS`,
-named after its directory; duplicate names are refused. `agent_options` turns
-on only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`),
-with `cwd` = the first root, `add_dirs` = the rest and `permission_mode="dontAsk"`,
-plus the in-process MCP tools `outline` and `list_roots` (`strict_mcp_config`).
+named after its directory; duplicate names are refused. `SourceTools(sources)` is the
+options fragment passed to the options owner in `agent.agent_options`: `apply` turns on
+only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`), with
+`cwd` = the first root, `add_dirs` = the rest, plus the in-process MCP tools `outline`
+and `list_roots`. It leaves `permission_mode`, `strict_mcp_config` and the model to
+the options owner.
 Three layers keep reads inside the roots and away from secrets:
 
 1. `dontAsk` denies reads outside the working directories.

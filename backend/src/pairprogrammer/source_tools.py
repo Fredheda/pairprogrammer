@@ -1,5 +1,6 @@
-"""Agent options: built-in Read/Grep/Glob confined to the roots, plus outline + list_roots."""
+"""Options fragment: built-in Read/Grep/Glob confined to the roots, plus outline + list_roots."""
 
+import dataclasses
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -86,24 +87,32 @@ def confine_to_roots(sources: Sources) -> Hook:
     return hook
 
 
-def agent_options(sources: Sources) -> ClaudeAgentOptions:
-    server = create_sdk_mcp_server(SERVER_NAME, tools=build_tools(sources))
-    # Read deny rules also filter Grep/Glob results ("//" = absolute path).
-    secret_rules = [
-        f"Read(/{root.path}/**/{pattern})" for root in sources.roots for pattern in SECRET_PATTERNS
-    ]
-    return ClaudeAgentOptions(
-        tools=list(BUILTIN_TOOLS),
-        allowed_tools=[*BUILTIN_TOOLS, *(f"mcp__{SERVER_NAME}__{name}" for name in MCP_TOOLS)],
-        disallowed_tools=secret_rules,
-        cwd=sources.cwd,
-        add_dirs=[root.path for root in sources.roots[1:]],
-        permission_mode="dontAsk",
-        mcp_servers={SERVER_NAME: server},
-        strict_mcp_config=True,
-        hooks={
-            "PreToolUse": [
-                HookMatcher(matcher="|".join(BUILTIN_TOOLS), hooks=[confine_to_roots(sources)])
-            ]
-        },
-    )
+class SourceTools:
+    # OptionsFragment: gives the agent read-only access to the source roots.
+
+    def __init__(self, sources: Sources) -> None:
+        self.sources = sources
+
+    def apply(self, options: ClaudeAgentOptions) -> ClaudeAgentOptions:
+        sources = self.sources
+        server = create_sdk_mcp_server(SERVER_NAME, tools=build_tools(sources))
+        # Read deny rules also filter Grep/Glob results ("//" = absolute path).
+        secret_rules = [
+            f"Read(/{root.path}/**/{pattern})"
+            for root in sources.roots
+            for pattern in SECRET_PATTERNS
+        ]
+        return dataclasses.replace(
+            options,
+            tools=list(BUILTIN_TOOLS),
+            allowed_tools=[*BUILTIN_TOOLS, *(f"mcp__{SERVER_NAME}__{name}" for name in MCP_TOOLS)],
+            disallowed_tools=secret_rules,
+            cwd=sources.cwd,
+            add_dirs=[root.path for root in sources.roots[1:]],
+            mcp_servers={SERVER_NAME: server},
+            hooks={
+                "PreToolUse": [
+                    HookMatcher(matcher="|".join(BUILTIN_TOOLS), hooks=[confine_to_roots(sources)])
+                ]
+            },
+        )

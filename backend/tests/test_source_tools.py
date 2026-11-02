@@ -4,12 +4,13 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from claude_agent_sdk import ClaudeAgentOptions
 
 from pairprogrammer.source_tools import (
     BUILTIN_TOOLS,
     MCP_TOOLS,
     SERVER_NAME,
-    agent_options,
+    SourceTools,
     build_tools,
     confine_to_roots,
 )
@@ -72,10 +73,17 @@ def test_only_read_only_mcp_tools_are_registered(sources: Sources) -> None:
         assert t.annotations is not None and t.annotations.read_only_hint is True
 
 
-def test_agent_options_allow_only_read_tools_inside_the_roots(
+def test_source_tools_apply_the_read_tools_to_the_options(
     sources: Sources, docs: Path, repo: Path
 ) -> None:
-    options = agent_options(sources)
+    base = ClaudeAgentOptions(
+        model="claude-sonnet-5-5", tools=[], permission_mode="dontAsk", strict_mcp_config=True
+    )
+    options = SourceTools(sources).apply(base)
+
+    assert options.model == "claude-sonnet-5-5"
+    assert options.permission_mode == "dontAsk"
+    assert options.strict_mcp_config is True
 
     assert options.tools == list(BUILTIN_TOOLS) == ["Read", "Grep", "Glob"]
     assert options.allowed_tools == [
@@ -89,8 +97,6 @@ def test_agent_options_allow_only_read_tools_inside_the_roots(
         assert not WRITE_CAPABLE.search(name.removeprefix(f"mcp__{SERVER_NAME}__")), name
     assert options.cwd == docs
     assert options.add_dirs == [repo]
-    assert options.permission_mode == "dontAsk"
-    assert options.strict_mcp_config is True
     assert isinstance(options.mcp_servers, dict)
     assert list(options.mcp_servers) == [SERVER_NAME]
     assert options.hooks is not None
@@ -98,10 +104,10 @@ def test_agent_options_allow_only_read_tools_inside_the_roots(
     assert matcher.matcher == "Read|Grep|Glob"
 
 
-def test_agent_options_deny_secret_reads_in_every_root(
+def test_source_tools_deny_secret_reads_in_every_root(
     sources: Sources, docs: Path, repo: Path
 ) -> None:
-    denied = agent_options(sources).disallowed_tools
+    denied = SourceTools(sources).apply(ClaudeAgentOptions()).disallowed_tools
 
     for root in (docs, repo):
         assert f"Read(/{root}/**/.env)" in denied
