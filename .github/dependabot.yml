@@ -1,4 +1,4 @@
-# Weekly version updates. `cooldown` makes Dependabot wait 14 days after a
+# Monthly version updates. `cooldown` makes Dependabot wait 14 days after a
 # release before proposing it, which keeps freshly published (possibly
 # compromised) versions out. Minor and patch updates are grouped into one PR
 # per ecosystem; majors stay separate. Dependabot PRs get no repo secrets, so
@@ -8,7 +8,7 @@ updates:
   - package-ecosystem: pip
     directory: /backend
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     labels: [dependencies]
     cooldown:
@@ -21,7 +21,7 @@ updates:
   - package-ecosystem: npm
     directory: /frontend
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     labels: [dependencies]
     cooldown:
@@ -34,7 +34,7 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule:
-      interval: weekly
+      interval: monthly
     open-pull-requests-limit: 5
     labels: [dependencies]
     cooldown:
