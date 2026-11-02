@@ -74,7 +74,7 @@ demand: `gitleaks` (PR commits; full history otherwise) and `workflow-lint`
 (actionlint) on every push, `bandit`, `pip-audit`, `npm-audit` and `codeql`
 once a PR is ready. Required on `main`: `backend`, `frontend`, `gitleaks`,
 `workflow-lint`, `bandit`. The audits are advisory on PRs and fail the weekly
-run. Dependabot (`.github/dependabot.yml`) proposes weekly grouped
+run. Dependabot (`.github/dependabot.yml`) proposes monthly grouped
 minor/patch updates for backend, frontend and actions, 14 days after release.
 
 ## PR review
