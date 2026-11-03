@@ -131,11 +131,12 @@ class SourceTools:
             matcher = ".*"
         else:
             tools = list(dict.fromkeys([*(tools or []), *BUILTIN_TOOLS]))
-        # plain tool names earlier fragments allowed (no mcp__*, no rule syntax)
+        # plain tool names earlier fragments allowed (no mcp__*, no rule syntax);
+        # the read tools are never exempt — they always go through deny_reason
         extra_allowed = frozenset(
             name
             for name in (options.allowed_tools or [])
-            if not name.startswith("mcp__") and "(" not in name
+            if name not in BUILTIN_TOOLS and not name.startswith("mcp__") and "(" not in name
         )
         # Merge with earlier fragments: drop nothing they already configured.
         return dataclasses.replace(

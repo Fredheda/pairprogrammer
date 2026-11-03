@@ -177,6 +177,42 @@ def test_hook_under_preset_denies_writes_but_passes_permitted(sources: Sources) 
     assert pre_tool_use(sources, "WebSearch", {"query": "x"}, extra) == {}
 
 
+def _run_hook(hook, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
+    input_data: Any = {
+        "hook_event_name": "PreToolUse",
+        "tool_name": tool_name,
+        "tool_input": tool_input,
+        "session_id": "s",
+        "transcript_path": "",
+        "cwd": "",
+    }
+
+    async def run() -> Any:
+        return await hook(input_data, "tool-use-1", {"signal": None})
+
+    return asyncio.run(run())
+
+
+def test_allowed_read_tools_never_bypass_confinement(sources: Sources, repo: Path) -> None:
+    # an earlier fragment may allow Read by name; confinement still applies
+    options = SourceTools(sources).apply(
+        ClaudeAgentOptions(
+            tools=ToolsPreset(type="preset", preset="claude_code"),
+            allowed_tools=["Read", "WebSearch"],
+        )
+    )
+    assert options.hooks is not None
+    [matcher] = options.hooks["PreToolUse"]
+    hook = matcher.hooks[0]
+
+    denied = _run_hook(hook, "Read", {"file_path": "/etc/passwd"})
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    (repo / ".env").write_text("API_KEY=secret\n")
+    denied = _run_hook(hook, "Read", {"file_path": str(repo / ".env")})
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert _run_hook(hook, "WebSearch", {"query": "x"}) == {}
+
+
 def test_source_tools_deny_secret_reads_in_every_root(
     sources: Sources, docs: Path, repo: Path
 ) -> None:
