@@ -40,7 +40,8 @@ options fragment passed to the options owner in `agent.agent_options`: `apply` t
 only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`), with
 `cwd` = the first root, `add_dirs` = the rest, plus the in-process MCP tools `outline`
 and `list_roots`. It leaves `permission_mode`, `strict_mcp_config` and the model to
-the options owner.
+the options owner, and merges with earlier fragments: a `tools` preset and a
+`.mcp.json` (`mcpServers`) path are preserved, not flattened into the map.
 Three layers keep reads inside the roots and away from secrets:
 
 1. `dontAsk` denies reads outside the working directories.
@@ -49,7 +50,9 @@ Three layers keep reads inside the roots and away from secrets:
    (remote URLs can carry tokens), secret names (`SECRET_PATTERNS`: `.env*`,
    `*.pem`, `*.key`, SSH keys, `.npmrc`, ...), gitignored paths
    (`git check-ignore`; if git is missing inside a checkout it fails closed)
-   and globs that target secrets or `.git`.
+   and globs that target secrets or `.git` — brace alternation (`{a,b}`) and a
+   trailing `*`/`**` are refused, since a catch-all whitelists gitignored
+   files; search without `glob` or name a file filter.
 3. `disallowed_tools` holds `Read(//<root>/**/<pattern>)` deny rules, which the
    CLI also applies to `Grep`/`Glob` results.
 

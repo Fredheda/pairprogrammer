@@ -172,11 +172,19 @@ class Sources:
         pattern = PurePosixPath(glob)
         if pattern.is_absolute() or ".." in pattern.parts:
             raise SourceError(f"glob is outside the source roots: {glob}")
-        last = pattern.name
         if ".git" in pattern.parts:
             raise SourceError(f"glob targets git metadata: {glob}")
-        if last not in ("*", "**") and any(fnmatch(s, last) for s in _SECRET_SAMPLES):
-            raise SourceError(f"glob targets secret files: {glob}")
+        # rg braces ({a,b}) pick alternates fnmatch can't see; refuse them
+        if "{" in glob or "}" in glob:
+            raise SourceError(f"glob uses alternation: {glob}")
+        # a trailing * or ** whitelists ignored files; name a file filter instead
+        if pattern.name in ("*", "**"):
+            raise SourceError(f"glob matches every file under the path: {glob}")
+        for part in pattern.parts:
+            if part in ("*", "**"):
+                continue
+            if any(fnmatch(s, part) for s in _SECRET_SAMPLES):
+                raise SourceError(f"glob targets secret files: {glob}")
 
     @staticmethod
     def _ignored(base: Path, target: Path) -> bool:

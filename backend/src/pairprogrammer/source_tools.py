@@ -111,10 +111,17 @@ class SourceTools:
             prior_servers = json.loads(
                 candidate.read_text() if candidate.is_file() else str(prior_servers)
             )
+            if isinstance(prior_servers, dict) and "mcpServers" in prior_servers:
+                # a .mcp.json file keeps its servers under "mcpServers"
+                prior_servers = prior_servers["mcpServers"]
+        # a tools preset already covers the read tools; only expand a list
+        tools = options.tools
+        if not isinstance(tools, dict):
+            tools = list(dict.fromkeys([*(tools or []), *BUILTIN_TOOLS]))
         # Merge with earlier fragments: drop nothing they already configured.
         return dataclasses.replace(
             options,
-            tools=list(dict.fromkeys([*(options.tools or []), *BUILTIN_TOOLS])),
+            tools=tools,
             allowed_tools=list(
                 dict.fromkeys([*(options.allowed_tools or []), *BUILTIN_TOOLS, *mcp_tools])
             ),

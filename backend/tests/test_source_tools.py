@@ -1,10 +1,12 @@
 import asyncio
+import json
 import re
 from pathlib import Path
 from typing import Any
 
 import pytest
 from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
+from claude_agent_sdk.types import ToolsPreset
 
 from pairprogrammer.source_tools import (
     BUILTIN_TOOLS,
@@ -123,6 +125,27 @@ def test_apply_merges_with_earlier_fragments(sources: Sources) -> None:
     matchers = options.hooks["PreToolUse"]
     assert matchers[0].matcher == "Bash"
     assert matchers[1].matcher == "Read|Grep|Glob"
+
+
+def test_apply_unwraps_a_mcp_config_file(sources: Sources, tmp_path: Path) -> None:
+    config = tmp_path / "agents.mcp.json"
+    config.write_text(
+        json.dumps({"mcpServers": {"jira": {"type": "stdio", "command": "jira-mcp"}}})
+    )
+
+    options = SourceTools(sources).apply(ClaudeAgentOptions(mcp_servers=str(config)))
+
+    assert isinstance(options.mcp_servers, dict)
+    assert set(options.mcp_servers) == {"jira", SERVER_NAME}
+
+
+def test_apply_keeps_a_tools_preset(sources: Sources) -> None:
+    preset = ToolsPreset(type="preset", preset="claude_code")
+
+    options = SourceTools(sources).apply(ClaudeAgentOptions(tools=preset))
+
+    assert options.tools == preset
+    assert "Read" in options.allowed_tools
 
 
 def test_source_tools_deny_secret_reads_in_every_root(

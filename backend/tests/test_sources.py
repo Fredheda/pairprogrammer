@@ -181,6 +181,29 @@ def test_denies_globs_that_target_secrets(
     assert "secret" in (sources.deny_reason(tool, tool_input) or "")
 
 
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Grep", {"pattern": "KEY", "glob": "{.env,x}"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/{.env,x}"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/.env/x"}),
+        # a trailing catch-all overrides ignore rules (e.g. gitignored files)
+        ("Grep", {"pattern": "KEY", "glob": "*"}),
+        ("Grep", {"pattern": "KEY", "glob": "docs/**"}),
+        ("Glob", {"pattern": "*"}),
+    ],
+)
+def test_denies_globs_that_evade_the_file_filters(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert sources.deny_reason(tool, tool_input) is not None
+
+
+def test_allows_globs_that_name_files_not_whole_dirs(sources: Sources) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "src/*/x.py"}) is None
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "**/*.md"}) is None
+
+
 def test_denies_other_tools_and_everything_without_roots(docs: Path) -> None:
     assert Sources([SourceRoot("docs", docs)]).deny_reason("Bash", {"command": "ls"})
     assert Sources([]).deny_reason(*read(docs / "readme.md"))
