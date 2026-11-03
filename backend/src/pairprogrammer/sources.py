@@ -208,8 +208,13 @@ class Sources:
         for part in pattern.parts:
             if part in ("*", "**"):
                 continue
-            # literal secret name (".env.local") or wildcard reaching one ("id_ed*")
-            if is_secret(part) or any(fnmatch(s, part) for s in _SECRET_SAMPLES):
+            # literal secret name (".env.local"), wildcard around one
+            # ("*.env.local"), or a wildcard reaching one ("id_ed*")
+            if (
+                is_secret(part)
+                or is_secret(part.strip("*?[]{}"))
+                or any(fnmatch(s, part) for s in _SECRET_SAMPLES)
+            ):
                 raise SourceError(f"glob targets secret files: {glob}")
 
     @staticmethod

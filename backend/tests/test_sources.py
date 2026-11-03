@@ -217,7 +217,18 @@ def test_every_secret_pattern_is_denied_as_a_glob(sources: Sources, pattern: str
 
 @pytest.mark.parametrize(
     "glob",
-    ["id_ed*", ".netrc", "*.pfx", ".pypirc", "id_ecdsa", ".env.local", "credentials.json"],
+    [
+        "id_ed*",
+        ".netrc",
+        "*.pfx",
+        ".pypirc",
+        "id_ecdsa",
+        ".env.local",
+        "credentials.json",
+        "*.env.local",
+        "*credentials.json",
+        ".env*",
+    ],
 )
 def test_denies_globs_for_secret_names_not_in_samples(sources: Sources, glob: str) -> None:
     assert sources.deny_reason("Grep", {"pattern": "KEY", "glob": glob}) is not None
