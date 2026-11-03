@@ -157,9 +157,7 @@ class SourceTools:
                         *[
                             root.path
                             for root in (
-                                sources.roots
-                                if options.cwd is not None
-                                else sources.roots[1:]
+                                sources.roots if options.cwd is not None else sources.roots[1:]
                             )
                         ],
                     ]
