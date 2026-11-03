@@ -50,8 +50,10 @@ def call(sources: Sources, name: str, args: dict[str, Any]) -> dict[str, Any]:
     return asyncio.run(run())
 
 
-def pre_tool_use(sources: Sources, tool_name: str, tool_input: dict[str, Any]) -> dict[str, Any]:
-    hook = confine_to_roots(sources)
+def pre_tool_use(
+    sources: Sources, tool_name: str, tool_input: dict[str, Any], extra_allowed=frozenset()
+) -> dict[str, Any]:
+    hook = confine_to_roots(sources, extra_allowed)
     input_data: Any = {
         "hook_event_name": "PreToolUse",
         "tool_name": tool_name,
@@ -159,6 +161,20 @@ def test_hook_lets_mcp_tools_through(sources: Sources) -> None:
     # fragments' (or this one's) config, not ambient built-ins
     assert pre_tool_use(sources, f"mcp__{SERVER_NAME}__outline", {}) == {}
     assert pre_tool_use(sources, "mcp__jira__get_issue", {}) == {}
+
+
+def test_hook_under_preset_denies_writes_but_passes_permitted(sources: Sources) -> None:
+    extra = frozenset({"WebSearch"})
+
+    denied = pre_tool_use(sources, "Write", {"file_path": "x"}, extra)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    denied = pre_tool_use(sources, "Bash", {"command": "ls"}, extra)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # unknown built-ins fail closed too
+    denied = pre_tool_use(sources, "FutureWriteTool", {}, extra)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    # built-ins an earlier fragment permitted by name keep working
+    assert pre_tool_use(sources, "WebSearch", {"query": "x"}, extra) == {}
 
 
 def test_source_tools_deny_secret_reads_in_every_root(

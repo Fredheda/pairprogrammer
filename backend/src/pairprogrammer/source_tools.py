@@ -67,18 +67,23 @@ def build_tools(sources: Sources) -> list[SdkMcpTool[Any]]:
     return [list_roots, outline]
 
 
-def confine_to_roots(sources: Sources) -> Hook:
-    """PreToolUse hook: deny Read/Grep/Glob outside the roots, on secrets or gitignored paths."""
+def confine_to_roots(sources: Sources, extra_allowed: frozenset[str] = frozenset()) -> Hook:
+    """PreToolUse hook: deny Read/Grep/Glob outside the roots, on secrets or gitignored paths.
+
+    With a ``.*`` matcher (tools preset) it sees every built-in: tools an
+    earlier fragment allowed by name pass through, everything else is denied.
+    """
 
     async def hook(
         input_data: HookInput, tool_use_id: str | None, context: HookContext
     ) -> HookJSONOutput:
         if input_data["hook_event_name"] != "PreToolUse":
             return {}
-        if input_data["tool_name"].startswith("mcp__"):
-            # configured servers, not ambient built-ins; confinement doesn't apply
+        tool_name = input_data["tool_name"]
+        if tool_name.startswith("mcp__") or tool_name in extra_allowed:
+            # configured servers / earlier-fragment-allowed built-ins
             return {}
-        reason = sources.deny_reason(input_data["tool_name"], input_data["tool_input"])
+        reason = sources.deny_reason(tool_name, input_data["tool_input"])
         if reason is None:
             return {}
         return {
@@ -121,10 +126,17 @@ class SourceTools:
         tools = options.tools
         matcher = "|".join(BUILTIN_TOOLS)
         if isinstance(tools, dict):
-            # a preset also exposes write/shell tools; the hook must see them all
+            # a preset also exposes write/shell tools; the hook must see them all,
+            # while names earlier fragments allowed still pass through
             matcher = ".*"
         else:
             tools = list(dict.fromkeys([*(tools or []), *BUILTIN_TOOLS]))
+        # plain tool names earlier fragments allowed (no mcp__*, no rule syntax)
+        extra_allowed = frozenset(
+            name
+            for name in (options.allowed_tools or [])
+            if not name.startswith("mcp__") and "(" not in name
+        )
         # Merge with earlier fragments: drop nothing they already configured.
         return dataclasses.replace(
             options,
@@ -142,7 +154,10 @@ class SourceTools:
                 **(options.hooks or {}),
                 "PreToolUse": [
                     *(options.hooks or {}).get("PreToolUse", []),
-                    HookMatcher(matcher=matcher, hooks=[confine_to_roots(sources)]),
+                    HookMatcher(
+                        matcher=matcher,
+                        hooks=[confine_to_roots(sources, extra_allowed)],
+                    ),
                 ],
             },
         )
