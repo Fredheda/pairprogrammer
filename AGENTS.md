@@ -22,6 +22,8 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 | Path | What |
 |------|------|
 | `backend/` | FastAPI app, package `pairprogrammer` in `src/`, tests in `tests/` |
+| `backend/src/pairprogrammer/sources.py` | Source roots, the path/secret checks behind the read hook, Markdown outline |
+| `backend/src/pairprogrammer/source_tools.py` | `SourceTools.apply`: built-in read tools, the `PreToolUse` hook, `outline`/`list_roots` |
 | `frontend/` | Next.js App Router app; `app/api/copilotkit/` is the CopilotKit runtime (no agents yet) |
 | `Procfile` | `honcho start` runs both apps |
 | `scripts/ci-local.sh` | Runs every check CI runs |
@@ -29,6 +31,36 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 
 The browser calls the backend through the Next.js rewrite `/backend/*` ->
 `BACKEND_URL` (default `http://localhost:8000`), so there is no CORS setup.
+
+## Read-only sources
+
+Roots: `docs` (`WORKSPACE_DOCS_DIR`) plus one per checkout in `REPO_ROOTS`,
+named after its directory; duplicate names are refused. `SourceTools(sources)` is the
+options fragment passed to the options owner in `agent.agent_options`: `apply` turns on
+only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`), with
+`cwd` = the first root (an earlier fragment's `cwd` wins), `add_dirs` = the rest,
+plus the in-process MCP tools `outline`
+and `list_roots`. It leaves `permission_mode`, `strict_mcp_config` and the model to
+the options owner, and merges with earlier fragments: a `tools` preset and a
+`.mcp.json` (`mcpServers`) path are preserved, not flattened into the map, and an
+earlier `cwd` keeps its value while every root joins `add_dirs` instead.
+Three layers keep reads inside the roots and away from secrets:
+
+1. `dontAsk` denies reads outside the working directories.
+2. The `PreToolUse` hook (`Sources.deny_reason`) resolves every path (symlinks
+   included) and denies anything outside a root, any `..`, `.git` metadata
+   (remote URLs can carry tokens), secret names (`SECRET_PATTERNS`: `.env*`,
+   `*.pem`, `*.key`, SSH keys, `.npmrc`, ...), gitignored paths
+   (`git check-ignore`; if git is missing inside a checkout it fails closed)
+   and globs that target secrets or `.git` — brace alternation (`{a,b}`) and a
+   trailing `*`/`**` are refused, since a catch-all whitelists gitignored
+   files; search without `glob` or name a file filter.
+3. `disallowed_tools` holds `Read(//<root>/**/<pattern>)` deny rules, which the
+   CLI also applies to `Grep`/`Glob` results.
+
+The model cites from `Read` line numbers and `Grep -n`; `outline` and
+`list_roots` attach `Source: <root>:<path>#L<n> (<heading>)` lines. Never add
+write, edit or shell tools; `tests/test_source_tools.py` fails if one appears.
 
 ## Commands
 
