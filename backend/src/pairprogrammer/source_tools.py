@@ -75,6 +75,9 @@ def confine_to_roots(sources: Sources) -> Hook:
     ) -> HookJSONOutput:
         if input_data["hook_event_name"] != "PreToolUse":
             return {}
+        if input_data["tool_name"].startswith("mcp__"):
+            # configured servers, not ambient built-ins; confinement doesn't apply
+            return {}
         reason = sources.deny_reason(input_data["tool_name"], input_data["tool_input"])
         if reason is None:
             return {}
@@ -116,7 +119,11 @@ class SourceTools:
                 prior_servers = prior_servers["mcpServers"]
         # a tools preset already covers the read tools; only expand a list
         tools = options.tools
-        if not isinstance(tools, dict):
+        matcher = "|".join(BUILTIN_TOOLS)
+        if isinstance(tools, dict):
+            # a preset also exposes write/shell tools; the hook must see them all
+            matcher = ".*"
+        else:
             tools = list(dict.fromkeys([*(tools or []), *BUILTIN_TOOLS]))
         # Merge with earlier fragments: drop nothing they already configured.
         return dataclasses.replace(
@@ -135,7 +142,7 @@ class SourceTools:
                 **(options.hooks or {}),
                 "PreToolUse": [
                     *(options.hooks or {}).get("PreToolUse", []),
-                    HookMatcher(matcher="|".join(BUILTIN_TOOLS), hooks=[confine_to_roots(sources)]),
+                    HookMatcher(matcher=matcher, hooks=[confine_to_roots(sources)]),
                 ],
             },
         )

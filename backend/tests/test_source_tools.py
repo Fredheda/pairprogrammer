@@ -146,6 +146,19 @@ def test_apply_keeps_a_tools_preset(sources: Sources) -> None:
 
     assert options.tools == preset
     assert "Read" in options.allowed_tools
+    # a preset exposes write/shell tools too, so the hook confines every call
+    assert options.hooks is not None
+    [matcher] = options.hooks["PreToolUse"]
+    assert matcher.matcher == ".*"
+    assert sources.deny_reason("Write", {"file_path": "x"}) is not None
+    assert sources.deny_reason("Bash", {"command": "ls"}) is not None
+
+
+def test_hook_lets_mcp_tools_through(sources: Sources) -> None:
+    # the widened matcher fires on every tool; MCP servers are other
+    # fragments' (or this one's) config, not ambient built-ins
+    assert pre_tool_use(sources, f"mcp__{SERVER_NAME}__outline", {}) == {}
+    assert pre_tool_use(sources, "mcp__jira__get_issue", {}) == {}
 
 
 def test_source_tools_deny_secret_reads_in_every_root(
