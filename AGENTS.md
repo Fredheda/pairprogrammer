@@ -45,9 +45,11 @@ Three layers keep reads inside the roots and away from secrets:
 
 1. `dontAsk` denies reads outside the working directories.
 2. The `PreToolUse` hook (`Sources.deny_reason`) resolves every path (symlinks
-   included) and denies anything outside a root, any `..`, secret names
-   (`SECRET_PATTERNS`: `.env*`, `*.pem`, `*.key`, SSH keys, `.npmrc`, ...),
-   gitignored paths (`git check-ignore`) and globs that target secrets.
+   included) and denies anything outside a root, any `..`, `.git` metadata
+   (remote URLs can carry tokens), secret names (`SECRET_PATTERNS`: `.env*`,
+   `*.pem`, `*.key`, SSH keys, `.npmrc`, ...), gitignored paths
+   (`git check-ignore`; if git is missing inside a checkout it fails closed)
+   and globs that target secrets or `.git`.
 3. `disallowed_tools` holds `Read(//<root>/**/<pattern>)` deny rules, which the
    CLI also applies to `Grep`/`Glob` results.
 

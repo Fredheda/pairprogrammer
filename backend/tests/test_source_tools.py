@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from claude_agent_sdk import ClaudeAgentOptions
+from claude_agent_sdk import ClaudeAgentOptions, HookMatcher
 
 from pairprogrammer.source_tools import (
     BUILTIN_TOOLS,
@@ -102,6 +102,27 @@ def test_source_tools_apply_the_read_tools_to_the_options(
     assert options.hooks is not None
     [matcher] = options.hooks["PreToolUse"]
     assert matcher.matcher == "Read|Grep|Glob"
+
+
+def test_apply_merges_with_earlier_fragments(sources: Sources) -> None:
+    base = ClaudeAgentOptions(
+        tools=["WebSearch"],
+        allowed_tools=["WebSearch"],
+        disallowed_tools=["Bash(//**)"],
+        mcp_servers={"jira": {"type": "stdio", "command": "true", "args": []}},
+        hooks={"PreToolUse": [HookMatcher(matcher="Bash", hooks=[])]},
+    )
+    options = SourceTools(sources).apply(base)
+
+    assert options.tools == ["WebSearch", *BUILTIN_TOOLS]
+    assert options.allowed_tools is not None and options.allowed_tools[0] == "WebSearch"
+    assert options.disallowed_tools is not None and "Bash(//**)" in options.disallowed_tools
+    assert isinstance(options.mcp_servers, dict)
+    assert "jira" in options.mcp_servers and SERVER_NAME in options.mcp_servers
+    assert options.hooks is not None
+    matchers = options.hooks["PreToolUse"]
+    assert matchers[0].matcher == "Bash"
+    assert matchers[1].matcher == "Read|Grep|Glob"
 
 
 def test_source_tools_deny_secret_reads_in_every_root(

@@ -12,7 +12,7 @@ from typing import Any
 
 DEFAULT_MAX_BYTES = 1_000_000
 HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
-FENCE = re.compile(r"^\s*(```|~~~)")
+FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
 # File names never shown to the model, wherever they sit in a root.
 SECRET_PATTERNS = (
     ".env",
@@ -121,16 +121,22 @@ class Sources:
         if source is None:
             raise SourceError(f"unknown root: {root}")
         base, target = self._check(str(source.path / path))
+        if base != source.path:
+            raise SourceError(f"path is outside the source root: {root}:{path}")
         if not target.is_file():
             raise SourceError(f"not a file: {root}:{path}")
         rel = target.relative_to(base).as_posix()
         lines: list[str] = []
         refs: list[SourceRef] = []
-        in_fence = False
+        fence: str | None = None
         for number, line in enumerate(self._lines(target), start=1):
-            if FENCE.match(line):
-                in_fence = not in_fence
-            elif not in_fence and (match := HEADING.match(line)):
+            if run := FENCE.match(line):
+                opening = run.group(1)
+                if fence is None:
+                    fence = opening
+                elif opening[0] == fence[0] and len(opening) >= len(fence):
+                    fence = None
+            elif fence is None and (match := HEADING.match(line)):
                 hashes, title = match.groups()
                 lines.append(f"L{number} {hashes} {title}")
                 refs.append(SourceRef(root, rel, lines=(number, number), heading=title))
@@ -153,6 +159,8 @@ class Sources:
         if not target.exists():
             raise SourceError(f"not found: {path}")
         named = [absolute.name, *target.relative_to(base).parts]
+        if ".git" in named:
+            raise SourceError(f"git metadata, not readable: {path}")
         if any(is_secret(part) for part in named):
             raise SourceError(f"secret file, not readable: {path}")
         if self._ignored(base, target):
@@ -165,13 +173,18 @@ class Sources:
         if pattern.is_absolute() or ".." in pattern.parts:
             raise SourceError(f"glob is outside the source roots: {glob}")
         last = pattern.name
+        if ".git" in pattern.parts:
+            raise SourceError(f"glob targets git metadata: {glob}")
         if last not in ("*", "**") and any(fnmatch(s, last) for s in _SECRET_SAMPLES):
             raise SourceError(f"glob targets secret files: {glob}")
 
     @staticmethod
     def _ignored(base: Path, target: Path) -> bool:
-        if _GIT is None or target == base:
+        if target == base:
             return False
+        if _GIT is None:
+            # can't check ignore rules; fail closed inside a checkout
+            return (base / ".git").exists()
         result = subprocess.run(  # noqa: S603  # nosec B603: fixed argv, no shell
             [_GIT, "-C", str(base), "check-ignore", "-q", "--", str(target)],
             capture_output=True,

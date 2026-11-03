@@ -1,7 +1,9 @@
 """Options fragment: built-in Read/Grep/Glob confined to the roots, plus outline + list_roots."""
 
 import dataclasses
+import json
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 from typing import Any
 
 from claude_agent_sdk import (
@@ -102,17 +104,31 @@ class SourceTools:
             for root in sources.roots
             for pattern in SECRET_PATTERNS
         ]
+        mcp_tools = [f"mcp__{SERVER_NAME}__{name}" for name in MCP_TOOLS]
+        prior_servers = options.mcp_servers
+        if isinstance(prior_servers, (str, Path)):
+            candidate = Path(str(prior_servers))
+            prior_servers = json.loads(
+                candidate.read_text() if candidate.is_file() else str(prior_servers)
+            )
+        # Merge with earlier fragments: drop nothing they already configured.
         return dataclasses.replace(
             options,
-            tools=list(BUILTIN_TOOLS),
-            allowed_tools=[*BUILTIN_TOOLS, *(f"mcp__{SERVER_NAME}__{name}" for name in MCP_TOOLS)],
-            disallowed_tools=secret_rules,
+            tools=list(dict.fromkeys([*(options.tools or []), *BUILTIN_TOOLS])),
+            allowed_tools=list(
+                dict.fromkeys([*(options.allowed_tools or []), *BUILTIN_TOOLS, *mcp_tools])
+            ),
+            disallowed_tools=list(
+                dict.fromkeys([*(options.disallowed_tools or []), *secret_rules])
+            ),
             cwd=sources.cwd,
             add_dirs=[root.path for root in sources.roots[1:]],
-            mcp_servers={SERVER_NAME: server},
+            mcp_servers={**(prior_servers or {}), SERVER_NAME: server},
             hooks={
+                **(options.hooks or {}),
                 "PreToolUse": [
-                    HookMatcher(matcher="|".join(BUILTIN_TOOLS), hooks=[confine_to_roots(sources)])
-                ]
+                    *(options.hooks or {}).get("PreToolUse", []),
+                    HookMatcher(matcher="|".join(BUILTIN_TOOLS), hooks=[confine_to_roots(sources)]),
+                ],
             },
         )

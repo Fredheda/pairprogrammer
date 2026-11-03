@@ -122,6 +122,21 @@ def test_denies_symlink_to_a_secret(sources: Sources, repo: Path) -> None:
     assert "secret" in (sources.deny_reason(*read(repo / "notes.txt")) or "")
 
 
+def test_denies_git_metadata(sources: Sources, repo: Path) -> None:
+    reason = sources.deny_reason(*read(repo / ".git" / "config"))
+    assert reason is not None and "git metadata" in reason
+
+
+def test_denies_gitignored_files_when_git_is_missing(
+    sources: Sources, repo: Path, docs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("pairprogrammer.sources._GIT", None)
+
+    # fail closed inside a repo, no gitignore elsewhere
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is not None
+    assert sources.deny_reason(*read(docs / "readme.md")) is None
+
+
 def test_denies_gitignored_files(sources: Sources, repo: Path) -> None:
     assert "ignored" in (sources.deny_reason(*read(repo / "dist" / "bundle.js")) or "")
     assert "ignored" in (sources.deny_reason("Grep", {"path": str(repo / "dist")}) or "")
@@ -182,6 +197,24 @@ def test_outline_lists_headings_outside_code_fences(sources: Sources) -> None:
     ]
     assert result.refs[1] == SourceRef("docs", "plans/voice.md", lines=(5, 5), heading="Goal")
     assert result.refs[1].cite() == "docs:plans/voice.md#L5 (Goal)"
+
+
+def test_outline_ignores_headings_inside_a_longer_fence(sources: Sources, docs: Path) -> None:
+    (docs / "fenced.md").write_text(
+        "````markdown\n```\n# hidden inside outer fence\n```\n````\n# shown\n"
+    )
+
+    result = sources.outline("docs", "fenced.md")
+
+    assert "shown" in result.text
+    assert "hidden" not in result.text
+
+
+def test_outline_rejects_a_path_inside_another_root(sources: Sources, repo: Path) -> None:
+    (repo / "plan.md").write_text("# App plan\n")
+
+    with pytest.raises(SourceError, match="outside"):
+        sources.outline("docs", str(repo / "plan.md"))
 
 
 def test_outline_without_headings(sources: Sources) -> None:
