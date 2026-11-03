@@ -38,10 +38,12 @@ Roots: `docs` (`WORKSPACE_DOCS_DIR`) plus one per checkout in `REPO_ROOTS`,
 named after its directory; duplicate names are refused. `SourceTools(sources)` is the
 options fragment passed to the options owner in `agent.agent_options`: `apply` turns on
 only the SDK built-ins `Read`, `Grep` and `Glob` (`tools` = `allowed_tools`), with
-`cwd` = the first root, `add_dirs` = the rest, plus the in-process MCP tools `outline`
+`cwd` = the first root (an earlier fragment's `cwd` wins), `add_dirs` = the rest,
+plus the in-process MCP tools `outline`
 and `list_roots`. It leaves `permission_mode`, `strict_mcp_config` and the model to
 the options owner, and merges with earlier fragments: a `tools` preset and a
-`.mcp.json` (`mcpServers`) path are preserved, not flattened into the map.
+`.mcp.json` (`mcpServers`) path are preserved, not flattened into the map, and an
+earlier `cwd` keeps its value while every root joins `add_dirs` instead.
 Three layers keep reads inside the roots and away from secrets:
 
 1. `dontAsk` denies reads outside the working directories.
