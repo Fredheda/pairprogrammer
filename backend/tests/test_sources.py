@@ -3,7 +3,13 @@ from pathlib import Path
 
 import pytest
 
-from pairprogrammer.sources import SourceError, SourceRef, SourceRoot, Sources
+from pairprogrammer.sources import (
+    SECRET_PATTERNS,
+    SourceError,
+    SourceRef,
+    SourceRoot,
+    Sources,
+)
 
 PLAN = """# Voice briefing plan
 
@@ -202,6 +208,16 @@ def test_denies_globs_that_evade_the_file_filters(
 def test_allows_globs_that_name_files_not_whole_dirs(sources: Sources) -> None:
     assert sources.deny_reason("Grep", {"pattern": "x", "glob": "src/*/x.py"}) is None
     assert sources.deny_reason("Grep", {"pattern": "x", "glob": "**/*.md"}) is None
+
+
+@pytest.mark.parametrize("pattern", list(SECRET_PATTERNS))
+def test_every_secret_pattern_is_denied_as_a_glob(sources: Sources, pattern: str) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "KEY", "glob": pattern}) is not None
+
+
+@pytest.mark.parametrize("glob", ["id_ed*", ".netrc", "*.pfx", ".pypirc", "id_ecdsa"])
+def test_denies_globs_for_secret_names_not_in_samples(sources: Sources, glob: str) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "KEY", "glob": glob}) is not None
 
 
 def test_denies_other_tools_and_everything_without_roots(docs: Path) -> None:

@@ -29,7 +29,15 @@ SECRET_PATTERNS = (
     ".netrc",
 )
 # Sample names a glob is tried against: a glob matching one targets secrets.
-_SECRET_SAMPLES = (".env", ".env.local", "x.pem", "x.key", "x.p12", "id_rsa", ".npmrc")
+# Derived from SECRET_PATTERNS (each `*` expanded to a literal and removed) so
+# the two lists can't drift apart.
+_SECRET_SAMPLES = tuple(
+    dict.fromkeys(
+        sample
+        for pattern in SECRET_PATTERNS
+        for sample in (pattern.replace("*", "x"), pattern.replace("*", ""))
+    )
+)
 _GIT = shutil.which("git")
 
 
