@@ -27,6 +27,23 @@ SECRET_PATTERNS = (
     ".npmrc",
     ".pypirc",
     ".netrc",
+    ".pgpass",
+    ".my.cnf",
+    ".git-credentials",
+    ".htpasswd",
+    "credentials.json",
+    "credentials.yaml",
+    "credentials.yml",
+    "credentials.xml",
+    "credentials.ini",
+    "local.settings.json",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    "*.keystore",
+    "*.jks",
+    "*.kdbx",
+    "service-account*.json",
 )
 # Sample names a glob is tried against: a glob matching one targets secrets.
 # Derived from SECRET_PATTERNS (each `*` expanded to a literal and removed) so
@@ -191,7 +208,8 @@ class Sources:
         for part in pattern.parts:
             if part in ("*", "**"):
                 continue
-            if any(fnmatch(s, part) for s in _SECRET_SAMPLES):
+            # literal secret name (".env.local") or wildcard reaching one ("id_ed*")
+            if is_secret(part) or any(fnmatch(s, part) for s in _SECRET_SAMPLES):
                 raise SourceError(f"glob targets secret files: {glob}")
 
     @staticmethod
