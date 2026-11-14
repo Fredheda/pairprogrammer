@@ -92,7 +92,8 @@ class SourceResult:
 
 
 def is_secret(name: str) -> bool:
-    return any(fnmatch(name, pattern) for pattern in SECRET_PATTERNS)
+    # lowercase: macOS filesystems are case-insensitive, so .ENV opens .env
+    return any(fnmatch(name.lower(), pattern) for pattern in SECRET_PATTERNS)
 
 
 class Sources:
@@ -208,12 +209,14 @@ class Sources:
         for part in pattern.parts:
             if part in ("*", "**"):
                 continue
-            # literal secret name (".env.local"), wildcard around one
-            # ("*.env.local"), or a wildcard reaching one ("id_ed*")
+            # literal secret name (".env.local"), a `*` around one
+            # ("*.env.local"), or a wildcard reaching one ("id_ed*"); `?` and
+            # `[]` need a character, so only `*` is stripped
+            lowered = part.lower()
             if (
-                is_secret(part)
-                or is_secret(part.strip("*?[]{}"))
-                or any(fnmatch(s, part) for s in _SECRET_SAMPLES)
+                is_secret(lowered)
+                or is_secret(lowered.strip("*"))
+                or any(fnmatch(s, lowered) for s in _SECRET_SAMPLES)
             ):
                 raise SourceError(f"glob targets secret files: {glob}")
 

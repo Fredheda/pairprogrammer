@@ -122,6 +122,13 @@ def test_denies_secret_files(sources: Sources, repo: Path, path: str) -> None:
     assert "secret" in (sources.deny_reason(*read(repo / path)) or "")
 
 
+@pytest.mark.parametrize("name", [".ENV", "Key.PEM", "ID_RSA", ".Env.Local"])
+def test_denies_secret_names_regardless_of_case(sources: Sources, repo: Path, name: str) -> None:
+    (repo / name).write_text("x\n")
+
+    assert "secret" in (sources.deny_reason(*read(repo / name)) or "")
+
+
 def test_denies_symlink_to_a_secret(sources: Sources, repo: Path) -> None:
     (repo / "notes.txt").symlink_to(repo / ".env")
 
@@ -208,6 +215,8 @@ def test_denies_globs_that_evade_the_file_filters(
 def test_allows_globs_that_name_files_not_whole_dirs(sources: Sources) -> None:
     assert sources.deny_reason("Grep", {"pattern": "x", "glob": "src/*/x.py"}) is None
     assert sources.deny_reason("Grep", {"pattern": "x", "glob": "**/*.md"}) is None
+    # `?` needs one char: this can't match credentials.json, only e.g. mycredentials.json
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "??credentials.json"}) is None
 
 
 @pytest.mark.parametrize("pattern", list(SECRET_PATTERNS))
@@ -228,6 +237,8 @@ def test_every_secret_pattern_is_denied_as_a_glob(sources: Sources, pattern: str
         "*.env.local",
         "*credentials.json",
         ".env*",
+        "*.ENV",
+        "src/.ENV.local",
     ],
 )
 def test_denies_globs_for_secret_names_not_in_samples(sources: Sources, glob: str) -> None:

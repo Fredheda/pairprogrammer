@@ -129,16 +129,18 @@ def test_apply_merges_with_earlier_fragments(sources: Sources) -> None:
     assert matchers[1].matcher == "Read|Grep|Glob"
 
 
-def test_apply_keeps_an_earlier_cwd_and_merges_add_dirs(
+def test_apply_keeps_sources_cwd_and_merges_earlier_directories(
     sources: Sources, docs: Path, repo: Path
 ) -> None:
+    # cwd anchors the hook's relative-path resolution, so sources.cwd always
+    # wins; an earlier cwd/add_dirs merge into add_dirs instead
     elsewhere = Path("/elsewhere")
     base = ClaudeAgentOptions(cwd=elsewhere, add_dirs=[Path("/extra"), docs])
 
     options = SourceTools(sources).apply(base)
 
-    assert options.cwd == elsewhere
-    assert options.add_dirs == [Path("/extra"), docs, repo]
+    assert options.cwd == docs
+    assert options.add_dirs == [Path("/extra"), elsewhere, repo]
 
 
 def test_apply_unwraps_a_mcp_config_file(sources: Sources, tmp_path: Path) -> None:

@@ -148,19 +148,18 @@ class SourceTools:
             disallowed_tools=list(
                 dict.fromkeys([*(options.disallowed_tools or []), *secret_rules])
             ),
-            # an earlier fragment's cwd wins; then every root joins add_dirs
-            cwd=options.cwd if options.cwd is not None else sources.cwd,
+            # cwd anchors the hook's relative-path resolution, so it is always
+            # the first root; an earlier cwd/add_dirs merge into add_dirs
+            cwd=sources.cwd,
             add_dirs=list(
                 dict.fromkeys(
-                    [
+                    directory
+                    for directory in [
                         *(options.add_dirs or []),
-                        *[
-                            root.path
-                            for root in (
-                                sources.roots if options.cwd is not None else sources.roots[1:]
-                            )
-                        ],
+                        *([options.cwd] if options.cwd is not None else []),
+                        *[root.path for root in sources.roots[1:]],
                     ]
+                    if directory != sources.cwd
                 )
             ),
             mcp_servers={**(prior_servers or {}), SERVER_NAME: server},
