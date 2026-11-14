@@ -22,7 +22,7 @@ Agent SDK background agent over AG-UI, slides as A2UI surfaces.
 | Path | What |
 |------|------|
 | `backend/` | FastAPI app, package `pairprogrammer` in `src/`, tests in `tests/` |
-| `backend/src/pairprogrammer/{jira,github}_client.py` | Read-only Jira and GitHub clients; `remote.py` holds the GET-only HTTP layer |
+| `backend/src/pairprogrammer/remote_tools.py` | `RemoteTools.apply`: the hosted Jira/GitHub MCP servers, read tools only |
 | `frontend/` | Next.js App Router app; `app/api/copilotkit/` is the CopilotKit runtime (no agents yet) |
 | `Procfile` | `honcho start` runs both apps |
 | `scripts/ci-local.sh` | Runs every check CI runs |
@@ -33,15 +33,30 @@ The browser calls the backend through the Next.js rewrite `/backend/*` ->
 
 ## Jira and GitHub reads
 
-`make_jira_client(env)` and `make_github_client(env)` are the factory seams
-(tests pass an `httpx.MockTransport`; see `tests/fake_http.py`). Both build
-clients on `read_only_client`, whose request hook raises `ReadOnlyViolation`
-for anything but GET, and `ReadOnlyHttp` exposes only `get`. Every call
-returns `RemoteResult(text, refs)` or `RemoteError(kind, ...)` (401, 403, 404,
-rate limits, network errors, bad input); nothing raises into the agent.
-Refs cite `jira:PAIR-7`, `jira:PAIR-7 (comment 10479)` or
-`github:Fredheda/pairprogrammer#2`. Jira keys and JQL are confined to
-projects PW, CKE, TA, PP, RR and PAIR; GitHub repos to `GITHUB_OWNER`.
+No custom clients: `RemoteTools(env)` is the options fragment the options
+owner applies; `apply` registers the two hosted MCP servers and names only
+their read tools in `allowed_tools` (`tools`/`allowed_tools` lists from an
+earlier fragment are appended to, `None` stays `None`):
+
+- `atlassian` — `https://mcp.atlassian.com/v1/mcp?capabilities=READ_JIRA,SEARCH_JIRA`.
+  The `capabilities` query drops every write tool server-side. Auth is
+  OAuth 2.1: sign in once in an interactive Claude Code session on the
+  machine running the backend (`claude`, then `/mcp` -> Authenticate); SDK
+  runs reuse the stored credential. Unsigned-in runs report `needs-auth`
+  and continue without Jira tools.
+- `github` — `https://api.githubcopilot.com/mcp/`. No OAuth on the hosted
+  server (no dynamic client registration), so `PAIR_GITHUB_TOKEN` carries a
+  fine-grained PAT (read permissions, scoped to the owner's repos). Headers
+  `X-MCP-Readonly: true` and `X-MCP-Toolsets: pull_requests` drop write
+  tools and unrelated toolsets server-side. Without the env var the server
+  and its tools are left out entirely.
+
+Read-only rests on those server-side layers, the PAT's permissions, and
+`allowed_tools` naming exactly `getJiraIssue`, `listJiraIssueComments`,
+`searchJiraIssuesUsingJql`, `list_pull_requests` and `pull_request_read`
+(the deferred-catalog write pathways `executeWrite`/`executeDestructive`
+are never allowed). Confinement is the account's own permissions — the
+OAuth user and the PAT's repo scope — not a URL or JQL rewrite.
 
 ## Commands
 
