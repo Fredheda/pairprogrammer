@@ -47,6 +47,8 @@ SECRET_PATTERNS = (
     "*.jks",
     "*.kdbx",
     "service-account*.json",
+    "*.tfstate*",
+    "*.tfvars",
 )
 # Sample names a glob is tried against: a glob matching one targets secrets.
 # Derived from SECRET_PATTERNS (each `*` expanded to a literal and removed) so
@@ -108,6 +110,7 @@ class Sources:
             if root.name in self._by_name:
                 raise SourceError(f"duplicate root name: {root.name}")
             self._by_name[root.name] = root
+        self._in_checkout: dict[Path, bool] = {}
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] = os.environ) -> "Sources":
@@ -224,13 +227,20 @@ class Sources:
                 raise SourceError(f"glob targets secret files: {glob}")
 
     @staticmethod
-    def _ignored(base: Path, target: Path) -> bool:
+    def _inside_checkout(base: Path) -> bool:
+        # `.git` (dir or worktree file) sits at the checkout root; a root nested
+        # inside a checkout finds it in an ancestor
+        return any((parent / ".git").exists() for parent in (base, *base.parents))
+
+    def _ignored(self, base: Path, target: Path) -> bool:
         if target == base:
             return False
+        if (inside := self._in_checkout.get(base)) is None:
+            inside = self._in_checkout[base] = self._inside_checkout(base)
         if _GIT is None:
             # can't check ignore rules; fail closed inside a checkout
-            return (base / ".git").exists()
-        if not (base / ".git").exists():
+            return inside
+        if not inside:
             return False  # not a checkout; ignore rules can't apply
         result = subprocess.run(  # noqa: S603  # nosec B603: fixed argv, no shell
             [

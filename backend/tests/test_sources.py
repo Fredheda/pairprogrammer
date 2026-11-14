@@ -155,6 +155,14 @@ def test_denies_gitignored_files(sources: Sources, repo: Path) -> None:
     assert "ignored" in (sources.deny_reason("Grep", {"path": str(repo / "dist")}) or "")
 
 
+def test_denies_gitignored_files_in_a_root_nested_inside_a_checkout(repo: Path, docs: Path) -> None:
+    (repo / ".gitignore").write_text("dist/\nsrc/ignored.txt\n")
+    (repo / "src" / "ignored.txt").write_text("terraform state\n")
+    nested = Sources([SourceRoot("docs", docs), SourceRoot("sub", repo / "src")])
+
+    assert "ignored" in (nested.deny_reason(*read(repo / "src" / "ignored.txt")) or "")
+
+
 def test_fails_closed_when_check_ignore_errors(
     sources: Sources, repo: Path, docs: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
