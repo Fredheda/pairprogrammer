@@ -3,7 +3,7 @@ name = "pairprogrammer"
 version = "0.1.0"
 description = "Backend for pairprogrammer: spoken briefings on work items and specs."
 requires-python = ">=3.13,<3.14"
-dependencies = ["fastapi (>=0.162.0,<0.163.0)", "uvicorn[standard] (>=0.54.0,<0.55.0)"]
+dependencies = ["fastapi (>=0.162.0,<0.163.0)", "uvicorn[standard] (>=0.54.0,<0.55.0)", "claude-agent-sdk (>=0.2.176,<0.3.0)"]
 
 [tool.poetry]
 packages = [{ include = "pairprogrammer", from = "src" }]

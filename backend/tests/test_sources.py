@@ -1,0 +1,385 @@
+import subprocess
+from pathlib import Path
+
+import pytest
+
+from pairprogrammer.sources import (
+    SECRET_PATTERNS,
+    SourceError,
+    SourceRef,
+    SourceRoot,
+    Sources,
+)
+
+PLAN = """# Voice briefing plan
+
+Intro text.
+
+## Goal
+
+Speak first within 3 s.
+
+```python
+# not a heading
+```
+
+## Steps
+
+### Step 1: token
+
+Mint an ephemeral token.
+"""
+
+
+@pytest.fixture
+def docs(tmp_path: Path) -> Path:
+    root = tmp_path / "docs"
+    (root / "plans").mkdir(parents=True)
+    (root / "plans" / "voice.md").write_text(PLAN)
+    (root / "readme.md").write_text("Pairprogrammer docs.\n")
+    return root
+
+
+@pytest.fixture
+def repo(tmp_path: Path) -> Path:
+    root = tmp_path / "app"
+    (root / "src").mkdir(parents=True)
+    (root / "dist").mkdir()
+    subprocess.run(["git", "init", "-q", str(root)], check=True)  # noqa: S603, S607
+    (root / ".gitignore").write_text("dist/\n")
+    (root / "src" / "main.py").write_text("print('hi')\n")
+    (root / "dist" / "bundle.js").write_text("x\n")
+    (root / ".env").write_text("API_KEY=secret\n")
+    (root / "src" / ".env.local").write_text("API_KEY=secret\n")
+    (root / "certs").mkdir()
+    (root / "certs" / "server.pem").write_text("-----BEGIN-----\n")
+    return root
+
+
+@pytest.fixture
+def sources(docs: Path, repo: Path) -> Sources:
+    return Sources([SourceRoot("docs", docs), SourceRoot("app", repo)])
+
+
+def read(path: str | Path) -> tuple[str, dict[str, str]]:
+    return "Read", {"file_path": str(path)}
+
+
+def test_duplicate_root_names_are_refused(tmp_path: Path) -> None:
+    (tmp_path / "a" / "app").mkdir(parents=True)
+    (tmp_path / "b" / "app").mkdir(parents=True)
+
+    with pytest.raises(SourceError, match="duplicate root name: app"):
+        Sources(
+            [SourceRoot("app", tmp_path / "a" / "app"), SourceRoot("app", tmp_path / "b" / "app")]
+        )
+    with pytest.raises(SourceError, match="duplicate root name: app"):
+        Sources.from_env({"REPO_ROOTS": f"{tmp_path / 'a' / 'app'},{tmp_path / 'b' / 'app'}"})
+
+
+def test_list_roots_gives_names_and_absolute_paths(
+    sources: Sources, docs: Path, repo: Path
+) -> None:
+    result = sources.list_roots()
+
+    assert result.text.splitlines() == [f"docs: {docs}", f"app: {repo}"]
+    assert result.refs == (SourceRef("docs", "."), SourceRef("app", "."))
+
+
+def test_cwd_is_the_first_root(sources: Sources, docs: Path) -> None:
+    assert sources.cwd == docs
+    assert Sources([]).cwd is None
+
+
+@pytest.mark.parametrize("path", ["readme.md", "plans/voice.md"])
+def test_allows_reads_inside_a_root(sources: Sources, docs: Path, path: str) -> None:
+    assert sources.deny_reason(*read(path)) is None
+    assert sources.deny_reason(*read(docs / path)) is None
+
+
+def test_allows_reads_in_other_roots(sources: Sources, repo: Path) -> None:
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is None
+
+
+@pytest.mark.parametrize(
+    "path", ["../secret.txt", "plans/../../secret.txt", "plans/../readme.md", "/etc/passwd"]
+)
+def test_denies_paths_that_leave_a_root(sources: Sources, path: str) -> None:
+    assert "outside" in (sources.deny_reason(*read(path)) or "")
+
+
+def test_denies_symlinks_that_escape_a_root(sources: Sources, docs: Path, tmp_path: Path) -> None:
+    (tmp_path / "secret.txt").write_text("top secret")
+    (docs / "link.txt").symlink_to(tmp_path / "secret.txt")
+    (docs / "linkdir").symlink_to(tmp_path, target_is_directory=True)
+
+    assert "outside" in (sources.deny_reason(*read(docs / "link.txt")) or "")
+    assert "outside" in (sources.deny_reason("Grep", {"path": str(docs / "linkdir")}) or "")
+
+
+@pytest.mark.parametrize("path", [".env", "src/.env.local", "certs/server.pem"])
+def test_denies_secret_files(sources: Sources, repo: Path, path: str) -> None:
+    assert "secret" in (sources.deny_reason(*read(repo / path)) or "")
+
+
+@pytest.mark.parametrize("name", [".ENV", "Key.PEM", "ID_RSA", ".Env.Local"])
+def test_denies_secret_names_regardless_of_case(sources: Sources, repo: Path, name: str) -> None:
+    (repo / name).write_text("x\n")
+
+    assert "secret" in (sources.deny_reason(*read(repo / name)) or "")
+
+
+def test_denies_symlink_to_a_secret(sources: Sources, repo: Path) -> None:
+    (repo / "notes.txt").symlink_to(repo / ".env")
+
+    assert "secret" in (sources.deny_reason(*read(repo / "notes.txt")) or "")
+
+
+def test_denies_git_metadata(sources: Sources, repo: Path) -> None:
+    reason = sources.deny_reason(*read(repo / ".git" / "config"))
+    assert reason is not None and "git metadata" in reason
+
+
+def test_denies_gitignored_files_when_git_is_missing(
+    sources: Sources, repo: Path, docs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("pairprogrammer.sources._GIT", None)
+
+    # fail closed inside a repo, no gitignore elsewhere
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is not None
+    assert sources.deny_reason(*read(docs / "readme.md")) is None
+
+
+def test_denies_gitignored_files(sources: Sources, repo: Path) -> None:
+    assert "ignored" in (sources.deny_reason(*read(repo / "dist" / "bundle.js")) or "")
+    assert "ignored" in (sources.deny_reason("Grep", {"path": str(repo / "dist")}) or "")
+
+
+def test_denies_gitignored_files_in_a_root_nested_inside_a_checkout(repo: Path, docs: Path) -> None:
+    (repo / ".gitignore").write_text("dist/\nsrc/ignored.txt\n")
+    (repo / "src" / "ignored.txt").write_text("terraform state\n")
+    nested = Sources([SourceRoot("docs", docs), SourceRoot("sub", repo / "src")])
+
+    assert "ignored" in (nested.deny_reason(*read(repo / "src" / "ignored.txt")) or "")
+
+
+def test_fails_closed_when_check_ignore_errors(
+    sources: Sources, repo: Path, docs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failed(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args=[], returncode=128, stderr=b"dubious ownership")
+
+    monkeypatch.setattr("pairprogrammer.sources.subprocess.run", failed)
+
+    # an error inside a checkout denies; a plain docs root is unaffected
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is not None
+    assert sources.deny_reason(*read(docs / "readme.md")) is None
+
+
+def test_grep_and_glob_default_to_the_cwd(sources: Sources) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "voice"}) is None
+    assert sources.deny_reason("Glob", {"pattern": "**/*.md"}) is None
+
+
+def test_grep_and_glob_stay_inside_roots(sources: Sources, repo: Path) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "x", "path": str(repo / "src")}) is None
+    assert "outside" in (sources.deny_reason("Grep", {"pattern": "x", "path": "/etc"}) or "")
+    assert "outside" in (sources.deny_reason("Glob", {"pattern": "*", "path": "/"}) or "")
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Glob", {"pattern": "/etc/*"}),
+        ("Glob", {"pattern": "../**/*"}),
+        ("Grep", {"pattern": "x", "glob": "../*"}),
+    ],
+)
+def test_denies_globs_that_leave_a_root(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert "outside" in (sources.deny_reason(tool, tool_input) or "")
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Grep", {"pattern": "KEY", "glob": ".env*"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/*.pem"}),
+        ("Glob", {"pattern": "**/.env"}),
+    ],
+)
+def test_denies_globs_that_target_secrets(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert "secret" in (sources.deny_reason(tool, tool_input) or "")
+
+
+@pytest.mark.parametrize(
+    ("tool", "tool_input"),
+    [
+        ("Grep", {"pattern": "KEY", "glob": "{.env,x}"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/{.env,x}"}),
+        ("Grep", {"pattern": "KEY", "glob": "**/.env/x"}),
+        # a trailing catch-all overrides ignore rules (e.g. gitignored files)
+        ("Grep", {"pattern": "KEY", "glob": "*"}),
+        ("Grep", {"pattern": "KEY", "glob": "docs/**"}),
+        ("Glob", {"pattern": "*"}),
+    ],
+)
+def test_denies_globs_that_evade_the_file_filters(
+    sources: Sources, tool: str, tool_input: dict[str, str]
+) -> None:
+    assert sources.deny_reason(tool, tool_input) is not None
+
+
+def test_allows_globs_that_name_files_not_whole_dirs(sources: Sources) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "src/*/x.py"}) is None
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "**/*.md"}) is None
+    # `?` needs one char: this can't match credentials.json, only e.g. mycredentials.json
+    assert sources.deny_reason("Grep", {"pattern": "x", "glob": "??credentials.json"}) is None
+
+
+@pytest.mark.parametrize("pattern", list(SECRET_PATTERNS))
+def test_every_secret_pattern_is_denied_as_a_glob(sources: Sources, pattern: str) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "KEY", "glob": pattern}) is not None
+
+
+@pytest.mark.parametrize(
+    "glob",
+    [
+        "id_ed*",
+        ".netrc",
+        "*.pfx",
+        ".pypirc",
+        "id_ecdsa",
+        ".env.local",
+        "credentials.json",
+        "*.env.local",
+        "*credentials.json",
+        ".env*",
+        "*.ENV",
+        "src/.ENV.local",
+    ],
+)
+def test_denies_globs_for_secret_names_not_in_samples(sources: Sources, glob: str) -> None:
+    assert sources.deny_reason("Grep", {"pattern": "KEY", "glob": glob}) is not None
+
+
+def test_denies_other_tools_and_everything_without_roots(docs: Path) -> None:
+    assert Sources([SourceRoot("docs", docs)]).deny_reason("Bash", {"command": "ls"})
+    assert Sources([]).deny_reason(*read(docs / "readme.md"))
+
+
+def test_outline_lists_headings_outside_code_fences(sources: Sources) -> None:
+    result = sources.outline("docs", "plans/voice.md")
+
+    assert result.text.splitlines() == [
+        "L1 # Voice briefing plan",
+        "L5 ## Goal",
+        "L13 ## Steps",
+        "L15 ### Step 1: token",
+    ]
+    assert result.refs[1] == SourceRef("docs", "plans/voice.md", lines=(5, 5), heading="Goal")
+    assert result.refs[1].cite() == "docs:plans/voice.md#L5 (Goal)"
+
+
+def test_outline_ignores_headings_inside_a_longer_fence(sources: Sources, docs: Path) -> None:
+    (docs / "fenced.md").write_text(
+        "````markdown\n```\n# hidden inside outer fence\n```\n````\n# shown\n"
+    )
+
+    result = sources.outline("docs", "fenced.md")
+
+    assert "shown" in result.text
+    assert "hidden" not in result.text
+
+
+def test_outline_rejects_a_path_inside_another_root(sources: Sources, repo: Path) -> None:
+    (repo / "plan.md").write_text("# App plan\n")
+
+    with pytest.raises(SourceError, match="outside"):
+        sources.outline("docs", str(repo / "plan.md"))
+
+
+def test_outline_without_headings(sources: Sources) -> None:
+    result = sources.outline("docs", "readme.md")
+
+    assert result.text == "no headings"
+    assert result.refs == (SourceRef("docs", "readme.md"),)
+
+
+@pytest.mark.parametrize(
+    ("root", "path", "error"),
+    [
+        ("nope", "readme.md", "unknown root"),
+        ("docs", "../secret.md", "outside"),
+        ("docs", "missing.md", "not found"),
+        ("app", ".env", "secret"),
+        ("app", "dist/bundle.js", "ignored"),
+    ],
+)
+def test_outline_refuses_what_the_hook_refuses(
+    sources: Sources, root: str, path: str, error: str
+) -> None:
+    with pytest.raises(SourceError, match=error):
+        sources.outline(root, path)
+
+
+def test_outline_works_in_a_root_nested_inside_another(tmp_path: Path, docs: Path) -> None:
+    nested = tmp_path / "pkg"
+    (nested / "sub").mkdir(parents=True)
+    (nested / "sub" / "readme.md").write_text("# Sub\n")
+    roots = Sources(
+        [SourceRoot("docs", docs), SourceRoot("pkg", nested), SourceRoot("sub", nested / "sub")]
+    )
+
+    assert "# Sub" in roots.outline("sub", "readme.md").text
+
+
+def test_outline_ignores_a_fence_run_with_trailing_text(sources: Sources, docs: Path) -> None:
+    doc = docs / "tricky.md"
+    doc.write_text("## Real A\n\n```md\n```bash\n# fake heading\n```\n\n## Real B\n")
+
+    text = sources.outline("docs", "tricky.md").text
+
+    assert "Real A" in text and "Real B" in text
+    assert "fake" not in text
+
+
+def test_outline_keeps_hashes_attached_to_a_title(sources: Sources, docs: Path) -> None:
+    doc = docs / "sharp.md"
+    doc.write_text("# C#\n\n## F# section #\n")
+
+    text = sources.outline("docs", "sharp.md").text
+
+    assert "# C#" in text
+    assert "## F# section" in text and "section #" not in text
+
+
+def test_outline_stops_at_the_byte_budget_on_a_whole_line(docs: Path) -> None:
+    (docs / "big.md").write_text("".join(f"# Überschrift {i}\n" for i in range(1, 101)))
+    sources = Sources([SourceRoot("docs", docs)], max_bytes=50)
+
+    result = sources.outline("docs", "big.md")
+
+    assert result.text.splitlines() == ["L1 # Überschrift 1", "L2 # Überschrift 2"]
+    assert "\ufffd" not in result.text
+
+
+def test_from_env_builds_docs_and_repo_roots(tmp_path: Path) -> None:
+    for name in ("docs", "repo-a", "repo-b"):
+        (tmp_path / name).mkdir()
+
+    sources = Sources.from_env(
+        {
+            "WORKSPACE_DOCS_DIR": str(tmp_path / "docs"),
+            "REPO_ROOTS": f"{tmp_path / 'repo-a'}, {tmp_path / 'repo-b'}",
+        }
+    )
+
+    assert [root.name for root in sources.roots] == ["docs", "repo-a", "repo-b"]
+
+
+def test_from_env_without_roots_is_empty() -> None:
+    assert Sources.from_env({}).roots == ()
