@@ -11,8 +11,11 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 DEFAULT_MAX_BYTES = 1_000_000
-HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*#*\s*$")
+# a closing hash run needs a space before it, so `# C#` keeps its title
+HEADING = re.compile(r"^(#{1,6})\s+(.+?)(?:\s+#+)?\s*$")
 FENCE = re.compile(r"^\s{0,3}(`{3,}|~{3,})")
+# a fence only closes on a bare run; ```python inside a block is content
+CLOSER = re.compile(r"^\s{0,3}(`{3,}|~{3,})\s*$")
 # File names never shown to the model, wherever they sit in a root.
 SECRET_PATTERNS = (
     ".env",
@@ -146,12 +149,12 @@ class Sources:
         source = self._by_name.get(root)
         if source is None:
             raise SourceError(f"unknown root: {root}")
-        base, target = self._check(str(source.path / path))
-        if base != source.path:
+        _, target = self._check(str(source.path / path))
+        if not target.is_relative_to(source.path):
             raise SourceError(f"path is outside the source root: {root}:{path}")
         if not target.is_file():
             raise SourceError(f"not a file: {root}:{path}")
-        rel = target.relative_to(base).as_posix()
+        rel = target.relative_to(source.path).as_posix()
         lines: list[str] = []
         refs: list[SourceRef] = []
         fence: str | None = None
@@ -160,7 +163,7 @@ class Sources:
                 opening = run.group(1)
                 if fence is None:
                     fence = opening
-                elif opening[0] == fence[0] and len(opening) >= len(fence):
+                elif opening[0] == fence[0] and len(opening) >= len(fence) and CLOSER.match(line):
                     fence = None
             elif fence is None and (match := HEADING.match(line)):
                 hashes, title = match.groups()
@@ -227,12 +230,25 @@ class Sources:
         if _GIT is None:
             # can't check ignore rules; fail closed inside a checkout
             return (base / ".git").exists()
+        if not (base / ".git").exists():
+            return False  # not a checkout; ignore rules can't apply
         result = subprocess.run(  # noqa: S603  # nosec B603: fixed argv, no shell
-            [_GIT, "-C", str(base), "check-ignore", "-q", "--", str(target)],
+            [
+                _GIT,
+                "-c",
+                "safe.directory=*",
+                "-C",
+                str(base),
+                "check-ignore",
+                "-q",
+                "--",
+                str(target),
+            ],
             capture_output=True,
             check=False,
         )
-        return result.returncode == 0
+        # 0 ignored, 1 not ignored; any error (e.g. dubious ownership) fails closed
+        return result.returncode != 1
 
     def _lines(self, file: Path) -> Iterator[str]:
         """Whole lines up to `max_bytes` (UTF-8), never a cut-off character."""

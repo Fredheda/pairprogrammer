@@ -155,6 +155,19 @@ def test_denies_gitignored_files(sources: Sources, repo: Path) -> None:
     assert "ignored" in (sources.deny_reason("Grep", {"path": str(repo / "dist")}) or "")
 
 
+def test_fails_closed_when_check_ignore_errors(
+    sources: Sources, repo: Path, docs: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def failed(*args: object, **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(args=[], returncode=128, stderr=b"dubious ownership")
+
+    monkeypatch.setattr("pairprogrammer.sources.subprocess.run", failed)
+
+    # an error inside a checkout denies; a plain docs root is unaffected
+    assert sources.deny_reason(*read(repo / "src" / "main.py")) is not None
+    assert sources.deny_reason(*read(docs / "readme.md")) is None
+
+
 def test_grep_and_glob_default_to_the_cwd(sources: Sources) -> None:
     assert sources.deny_reason("Grep", {"pattern": "voice"}) is None
     assert sources.deny_reason("Glob", {"pattern": "**/*.md"}) is None
@@ -303,6 +316,37 @@ def test_outline_refuses_what_the_hook_refuses(
 ) -> None:
     with pytest.raises(SourceError, match=error):
         sources.outline(root, path)
+
+
+def test_outline_works_in_a_root_nested_inside_another(tmp_path: Path, docs: Path) -> None:
+    nested = tmp_path / "pkg"
+    (nested / "sub").mkdir(parents=True)
+    (nested / "sub" / "readme.md").write_text("# Sub\n")
+    roots = Sources(
+        [SourceRoot("docs", docs), SourceRoot("pkg", nested), SourceRoot("sub", nested / "sub")]
+    )
+
+    assert "# Sub" in roots.outline("sub", "readme.md").text
+
+
+def test_outline_ignores_a_fence_run_with_trailing_text(sources: Sources, docs: Path) -> None:
+    doc = docs / "tricky.md"
+    doc.write_text("## Real A\n\n```md\n```bash\n# fake heading\n```\n\n## Real B\n")
+
+    text = sources.outline("docs", "tricky.md").text
+
+    assert "Real A" in text and "Real B" in text
+    assert "fake" not in text
+
+
+def test_outline_keeps_hashes_attached_to_a_title(sources: Sources, docs: Path) -> None:
+    doc = docs / "sharp.md"
+    doc.write_text("# C#\n\n## F# section #\n")
+
+    text = sources.outline("docs", "sharp.md").text
+
+    assert "# C#" in text
+    assert "## F# section" in text and "section #" not in text
 
 
 def test_outline_stops_at_the_byte_budget_on_a_whole_line(docs: Path) -> None:
