@@ -143,6 +143,31 @@ def test_apply_keeps_sources_cwd_and_merges_earlier_directories(
     assert options.add_dirs == [Path("/extra"), elsewhere, repo]
 
 
+def test_apply_resolves_a_relative_mcp_config_against_cwd(sources: Sources, tmp_path: Path) -> None:
+    config = tmp_path / "cfg" / "mcp.json"
+    config.parent.mkdir()
+    config.write_text(
+        json.dumps({"mcpServers": {"jira": {"type": "stdio", "command": "true", "args": []}}})
+    )
+    base = ClaudeAgentOptions(cwd=tmp_path, mcp_servers="cfg/mcp.json")
+
+    options = SourceTools(sources).apply(base)
+
+    assert isinstance(options.mcp_servers, dict)
+    assert "jira" in options.mcp_servers and SERVER_NAME in options.mcp_servers
+
+
+def test_apply_parses_long_inline_mcp_json(sources: Sources) -> None:
+    token = "x" * 300  # inline JSON longer than any filename limit
+    inline = json.dumps({"mcpServers": {"jira": {"type": "stdio", "command": token, "args": []}}})
+    base = ClaudeAgentOptions(mcp_servers=inline)
+
+    options = SourceTools(sources).apply(base)
+
+    assert isinstance(options.mcp_servers, dict)
+    assert options.mcp_servers["jira"] == {"type": "stdio", "command": token, "args": []}
+
+
 def test_apply_unwraps_a_mcp_config_file(sources: Sources, tmp_path: Path) -> None:
     config = tmp_path / "agents.mcp.json"
     config.write_text(

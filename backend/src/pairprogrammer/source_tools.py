@@ -115,10 +115,16 @@ class SourceTools:
         mcp_tools = [f"mcp__{SERVER_NAME}__{name}" for name in MCP_TOOLS]
         prior_servers = options.mcp_servers
         if isinstance(prior_servers, (str, Path)):
-            candidate = Path(str(prior_servers))
-            prior_servers = json.loads(
-                candidate.read_text() if candidate.is_file() else str(prior_servers)
-            )
+            raw = str(prior_servers)
+            candidate = Path(raw)
+            if not candidate.is_absolute() and options.cwd is not None:
+                # the CLI resolves a relative config path against options.cwd
+                candidate = options.cwd / candidate
+            try:
+                is_file = candidate.is_file()
+            except OSError:
+                is_file = False  # over-length etc. — inline JSON, not a path
+            prior_servers = json.loads(candidate.read_text() if is_file else raw)
             if isinstance(prior_servers, dict) and "mcpServers" in prior_servers:
                 # a .mcp.json file keeps its servers under "mcpServers"
                 prior_servers = prior_servers["mcpServers"]
