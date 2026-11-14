@@ -33,6 +33,8 @@ GITHUB_URL = "https://api.githubcopilot.com/mcp/"
 GITHUB_TOKEN_ENV = "PAIR_GITHUB_TOKEN"  # noqa: S105 - env var name, not a value
 
 ATLASSIAN_TOOLS = (
+    # Jira reads need a cloudId; this read-only discovery tool resolves it
+    "mcp__atlassian__getAccessibleAtlassianResources",
     "mcp__atlassian__getJiraIssue",
     "mcp__atlassian__listJiraIssueComments",
     "mcp__atlassian__searchJiraIssuesUsingJql",

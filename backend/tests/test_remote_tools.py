@@ -47,6 +47,7 @@ def test_apply_allows_only_read_tools(env: dict[str, str]) -> None:
 
     assert options.allowed_tools == [
         "Read",
+        "mcp__atlassian__getAccessibleAtlassianResources",
         "mcp__atlassian__getJiraIssue",
         "mcp__atlassian__listJiraIssueComments",
         "mcp__atlassian__searchJiraIssuesUsingJql",
@@ -66,6 +67,7 @@ def test_apply_leaves_the_default_tool_list_alone(env: dict[str, str]) -> None:
 
     assert options.tools is None
     assert options.allowed_tools == [
+        "mcp__atlassian__getAccessibleAtlassianResources",
         "mcp__atlassian__getJiraIssue",
         "mcp__atlassian__listJiraIssueComments",
         "mcp__atlassian__searchJiraIssuesUsingJql",

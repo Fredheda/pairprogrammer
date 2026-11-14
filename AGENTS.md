@@ -52,7 +52,8 @@ earlier fragment are appended to, `None` stays `None`):
   and its tools are left out entirely.
 
 Read-only rests on those server-side layers, the PAT's permissions, and
-`allowed_tools` naming exactly `getJiraIssue`, `listJiraIssueComments`,
+`allowed_tools` naming exactly `getAccessibleAtlassianResources` (Jira reads
+need a `cloudId`), `getJiraIssue`, `listJiraIssueComments`,
 `searchJiraIssuesUsingJql`, `list_pull_requests` and `pull_request_read`
 (the deferred-catalog write pathways `executeWrite`/`executeDestructive`
 are never allowed). Confinement is the account's own permissions — the
